@@ -18,6 +18,7 @@ use Base3\Event\Api\IEventManager;
 use Base3\Event\EventManager;
 use Base3\Language\Api\ILanguage;
 use Base3\Logger\Api\ILogger;
+use Base3\Logger\ScopedDatabaseLogger\ScopedDatabaseLogger;
 use Base3\Session\Api\ISession;
 use Base3\Translation\Api\ITranslation;
 use Base3\Usermanager\Api\IUsermanager;
@@ -28,7 +29,6 @@ use Base3Moodle\Adapter\MoodleConfiguration;
 use Base3Moodle\Adapter\MoodleDatabase;
 use Base3Moodle\Adapter\MoodleFileStorageFactory;
 use Base3Moodle\Adapter\MoodleLanguage;
-use Base3Moodle\Adapter\MoodleLogger;
 use Base3Moodle\Adapter\MoodleManagedFileStorageService;
 use Base3Moodle\Adapter\MoodleMvcView;
 use Base3Moodle\Adapter\MoodleSession;
@@ -50,7 +50,7 @@ final class Base3MoodlePlugin implements IPlugin, IBase {
 			->set('configuration', IConfiguration::class, IContainer::ALIAS)
 			->set(IDatabase::class, fn() => new MoodleDatabase(), IContainer::SHARED)
 			->set('database', IDatabase::class, IContainer::ALIAS)
-			->set(ILogger::class, fn() => new MoodleLogger(), IContainer::SHARED)
+			->set(ILogger::class, fn($c) => new ScopedDatabaseLogger($c->get(IDatabase::class)), IContainer::SHARED)
 			->set('logger', ILogger::class, IContainer::ALIAS)
 			->set(ISession::class, fn() => new MoodleSession(), IContainer::SHARED)
 			->set('session', ISession::class, IContainer::ALIAS)
