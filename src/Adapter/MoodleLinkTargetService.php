@@ -5,13 +5,23 @@ namespace Base3Moodle\Adapter;
 use Base3\LinkTarget\Api\ILinkTargetService;
 
 final class MoodleLinkTargetService implements ILinkTargetService {
+
 	public function getLink(array $target, array $params = []): string {
 		$name = (string) ($target['name'] ?? '');
 		$out = (string) ($target['out'] ?? $params['out'] ?? 'html');
-		unset($params['name'], $params['out'], $params['sesskey']);
-		// Moodle's sesskey is a transport concern. The application's own action,
-		// often POST action=save, is not renamed or filtered.
+		$hasAction = array_key_exists('action', $params);
+		$action = $hasAction ? (string) $params['action'] : '';
+
+		unset($params['name'], $params['out'], $params['sesskey'], $params['action']);
 		$transport = ['name' => $name, 'out' => $out, 'sesskey' => sesskey()];
-		return (new \moodle_url('/local/base3/ajax.php', array_merge($params, $transport)))->out(false);
+		$url = (new \moodle_url('/local/base3/ajax.php', array_merge($params, $transport)))->out(false);
+
+		// Some BASE3 displays append the action value directly to this URL.
+		// Keep action last, including the '=' for an empty value.
+		if ($hasAction) {
+			$url .= '&action=' . rawurlencode($action);
+		}
+
+		return $url;
 	}
 }
