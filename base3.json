@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "name": "Base3Moodle",
   "namespace": "Base3Moodle",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Moodle host adapters for the BASE3 runtime.",
   "dependencies": {
     "Base3Framework": ">=4.10.0",

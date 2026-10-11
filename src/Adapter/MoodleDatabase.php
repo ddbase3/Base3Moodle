@@ -4,105 +4,220 @@ namespace Base3Moodle\Adapter;
 
 use Base3\Database\Api\IDatabase;
 use RuntimeException;
+use Throwable;
 
-/** Executes BASE3 SQL using Moodle's existing DB connection. BASE3 SQL in the shipped modules is MariaDB SQL. */
+/**
+ * The BASE3 SQL connection for a Moodle installation using MySQL or MariaDB.
+ *
+ * BASE3 sends complete SQL statements and expects native MySQL result shapes.
+ * Moodle's DML API transforms both SQL and returned column names and therefore
+ * cannot implement that contract. This adapter uses a single lazy mysqli
+ * connection for all BASE3 database operations.
+ *
+ * The connection uses Moodle's configured database credentials, but it does
+ * not participate in transactions started through Moodle's $DB connection.
+ */
 final class MoodleDatabase implements IDatabase {
 
-	private bool $open = false;
-	private mixed $transaction = null;
+	private ?\mysqli $connection = null;
+	private bool $inTransaction = false;
 	private int $affected = 0;
 	private int|string $insertid = 0;
 	private int $lastcode = 0;
 	private string $lastmessage = '';
-	private ?bool $backslashEscapes = null;
-	private bool $ansiQuotes = false;
 
 	public function connect(): void {
-		global $DB;
-		if ($this->open) return;
-		if (!isset($DB) || !$DB instanceof \moodle_database) {
-			throw new RuntimeException('The Moodle database must be ready before BASE3 starts.');
+		if ($this->connection !== null) return;
+
+		global $CFG;
+		$connection = null;
+
+		try {
+			if (!isset($CFG) || !is_object($CFG)) {
+				throw new RuntimeException('Moodle must be initialized before BASE3 database access.');
+			}
+			if (!in_array($CFG->dbtype ?? '', ['mariadb', 'mysqli', 'mysql'], true)) {
+				throw new RuntimeException('BASE3 SQL requires a Moodle MySQL or MariaDB database.');
+			}
+			if (!function_exists('mysqli_init')) {
+				throw new RuntimeException('The PHP mysqli extension is required for BASE3 database access.');
+			}
+
+			$options = $CFG->dboptions ?? [];
+			if (!is_array($options)) {
+				throw new RuntimeException('Moodle database options must be an array.');
+			}
+
+			$host = (string) ($CFG->dbhost ?? '');
+			$user = (string) ($CFG->dbuser ?? '');
+			$name = (string) ($CFG->dbname ?? '');
+			$password = (string) ($CFG->dbpass ?? '');
+			if ($host === '' || $user === '' || $name === '') {
+				throw new RuntimeException('Moodle database host, user and name must be configured.');
+			}
+
+			$port = $options['dbport'] ?? '';
+			$port = $port === '' || $port === null ? (int) ini_get('mysqli.default_port') : (int) $port;
+			if ($port === 0) $port = 3306;
+			if ($port < 1 || $port > 65535) {
+				throw new RuntimeException('Invalid Moodle database port.');
+			}
+
+			$socket = $options['dbsocket'] ?? null;
+			if ($socket === true) $socket = ini_get('mysqli.default_socket') ?: null;
+			if ($socket === false || $socket === '') $socket = null;
+			if ($socket !== null && !is_string($socket)) {
+				throw new RuntimeException('Invalid Moodle database socket.');
+			}
+
+			if (!empty($options['dbpersist'])) $host = 'p:' . $host;
+
+			$flags = !empty($options['clientcompress']) ? MYSQLI_CLIENT_COMPRESS : 0;
+			$ssl = (string) ($options['ssl'] ?? '');
+			if ($ssl !== '') {
+				if (!in_array($ssl, ['require', 'verify-full'], true)) {
+					throw new RuntimeException('Unsupported Moodle MySQL SSL mode: ' . $ssl);
+				}
+				$flags |= MYSQLI_CLIENT_SSL;
+				if ($ssl === 'verify-full') {
+					if (!defined('MYSQLI_CLIENT_SSL_VERIFY_SERVER_CERT')) {
+						throw new RuntimeException('This mysqli client cannot verify the database server certificate.');
+					}
+					$flags |= MYSQLI_CLIENT_SSL_VERIFY_SERVER_CERT;
+				}
+			}
+
+			$connection = \mysqli_init();
+			if (!$connection instanceof \mysqli) {
+				throw new RuntimeException('Unable to initialize the mysqli connection.');
+			}
+			if (!$connection->real_connect($host, $user, $password, $name, $port, $socket, $flags)) {
+				throw new RuntimeException(
+					'Unable to connect BASE3 to the Moodle database: ' . $connection->connect_error,
+					(int) $connection->connect_errno
+				);
+			}
+			if (!$connection->set_charset('utf8mb4')) {
+				throw $this->connectionError($connection, 'Unable to set BASE3 database charset');
+			}
+
+			$this->connection = $connection;
+			$this->affected = 0;
+			$this->insertid = 0;
+			$this->clearError();
+		} catch (Throwable $error) {
+			$this->recordError($error);
+			if ($connection instanceof \mysqli) {
+				try {
+					$connection->close();
+				} catch (Throwable) {
+					// Keep the original connection error.
+				}
+			}
+			throw $error;
 		}
-		if ($DB->get_dbfamily() !== 'mysql') {
-			throw new RuntimeException('This BASE3 integration requires the existing MariaDB/MySQL Moodle database.');
-		}
-		$this->open = true;
 	}
 
-	public function connected(): bool { return $this->open; }
+	public function connected(): bool {
+		return $this->connection !== null;
+	}
+
 	public function disconnect(): void {
-		if ($this->transaction !== null) throw new RuntimeException('Cannot disconnect BASE3 inside an active transaction.');
-		// Moodle owns and closes the underlying connection at the end of its request.
-		$this->open = false;
+		if ($this->inTransaction) {
+			throw new RuntimeException('Cannot disconnect BASE3 during an active transaction.');
+		}
+		if ($this->connection === null) return;
+		$connection = $this->connection;
+		$this->attempt(static fn() => $connection->close());
+		$this->connection = null;
+		$this->affected = 0;
+		$this->insertid = 0;
 	}
 
 	public function beginTransaction(): void {
-		global $DB;
-		$this->connect();
-		if ($this->transaction !== null) throw new RuntimeException('Nested BASE3 transactions are not supported.');
-		$this->transaction = $this->perform(fn() => $DB->start_delegated_transaction());
+		$connection = $this->getConnection();
+		if ($this->inTransaction) throw new RuntimeException('Nested BASE3 transactions are not supported.');
+		$this->attempt(function() use ($connection): void {
+			if (!$connection->begin_transaction()) {
+				throw $this->connectionError($connection, 'Unable to begin BASE3 transaction');
+			}
+		});
+		$this->inTransaction = true;
 	}
 
 	public function commit(): void {
-		if ($this->transaction === null) throw new RuntimeException('BASE3 transaction was not started.');
-		$tx = $this->transaction;
-		$this->transaction = null;
-		$this->perform(static fn() => $tx->allow_commit());
+		if (!$this->inTransaction) throw new RuntimeException('No BASE3 transaction is active.');
+		$connection = $this->getConnection();
+		$this->attempt(function() use ($connection): void {
+			if (!$connection->commit()) {
+				throw $this->connectionError($connection, 'Unable to commit BASE3 transaction');
+			}
+		});
+		$this->inTransaction = false;
 	}
 
 	public function rollback(): void {
-		if ($this->transaction === null) throw new RuntimeException('BASE3 transaction was not started.');
-		$tx = $this->transaction;
-		$this->transaction = null;
-		// Moodle's delegated transaction rollback rethrows the supplied reason.
-		$reason = new RuntimeException('BASE3 requested a transaction rollback.');
-		try {
-			$tx->rollback($reason);
-		} catch (\Throwable $error) {
-			if ($error !== $reason) throw $error;
-		}
+		if (!$this->inTransaction) throw new RuntimeException('No BASE3 transaction is active.');
+		$connection = $this->getConnection();
+		$this->attempt(function() use ($connection): void {
+			if (!$connection->rollback()) {
+				throw $this->connectionError($connection, 'Unable to roll back BASE3 transaction');
+			}
+		});
+		$this->inTransaction = false;
 	}
 
 	public function nonQuery(string $query): void {
-		global $DB;
-		$this->connect();
-		[$sql, $params] = $this->prepareSql($query);
-		$this->perform(fn() => $DB->execute($sql, $params));
-		// ROW_COUNT and LAST_INSERT_ID belong to the same existing Moodle connection.
-		$this->affected = max(0, (int) $this->perform(fn() => $DB->get_field_sql('SELECT ROW_COUNT()')));
-		$this->insertid = (int) $this->perform(fn() => $DB->get_field_sql('SELECT LAST_INSERT_ID()'));
+		$connection = $this->getConnection();
+		$this->affected = 0;
+		$this->insertid = 0;
+		$this->attempt(function() use ($connection, $query): void {
+			$result = $connection->query($query);
+			if ($result === false) {
+				throw $this->connectionError($connection, 'BASE3 database query failed');
+			}
+			if ($result instanceof \mysqli_result) $result->free();
+			$this->affected = max(0, (int) $connection->affected_rows);
+			$this->insertid = $connection->insert_id;
+		});
 	}
 
 	public function scalarQuery(string $query): mixed {
-		$rows = $this->multiQuery($query);
-		return $rows === [] ? null : (array_values($rows[0])[0] ?? null);
+		return $this->read($query, static function(\mysqli_result $result): mixed {
+			$row = $result->fetch_row();
+			if ($row === false) throw new RuntimeException('Unable to fetch BASE3 database result.');
+			return $row === null ? null : ($row[0] ?? null);
+		});
 	}
 
 	public function singleQuery(string $query): ?array {
-		$rows = $this->multiQuery($query);
-		return $rows[0] ?? null;
+		return $this->read($query, static function(\mysqli_result $result): ?array {
+			$row = $result->fetch_assoc();
+			if ($row === false) throw new RuntimeException('Unable to fetch BASE3 database result.');
+			return $row;
+		});
 	}
 
 	public function &listQuery(string $query): array {
-		$rows = $this->multiQuery($query);
-		$result = array_map(static fn(array $row) => array_values($row)[0] ?? null, $rows);
-		return $result;
+		$list = $this->read($query, static function(\mysqli_result $result): array {
+			$values = [];
+			while (($row = $result->fetch_row()) !== null) {
+				if ($row === false) throw new RuntimeException('Unable to fetch BASE3 database result.');
+				$values[] = $row[0] ?? null;
+			}
+			return $values;
+		});
+		return $list;
 	}
 
 	public function &multiQuery(string $query): array {
-		global $DB;
-		$this->connect();
-		[$sql, $params] = $this->prepareSql($query);
-		$rows = $this->perform(function() use ($DB, $sql, $params): array {
-			// get_records_sql would discard rows with nonunique first-column values.
-			$recordset = $DB->get_recordset_sql($sql, $params);
-			$result = [];
-			try {
-				foreach ($recordset as $record) $result[] = (array) $record;
-			} finally {
-				$recordset->close();
+		$rows = $this->read($query, static function(\mysqli_result $result): array {
+			$values = [];
+			while (($row = $result->fetch_assoc()) !== null) {
+				if ($row === false) throw new RuntimeException('Unable to fetch BASE3 database result.');
+				$values[] = $row;
 			}
-			return $result;
+			return $values;
 		});
 		return $rows;
 	}
@@ -111,146 +226,59 @@ final class MoodleDatabase implements IDatabase {
 	public function insertId(): int|string { return $this->insertid; }
 
 	public function escape(string $str): string {
-		global $DB;
-		$this->connect();
-		$this->loadSqlMode();
-		if (!$this->backslashEscapes) {
-			if (str_contains($str, "\0")) throw new RuntimeException('Cannot quote NUL in this SQL mode.');
-			return str_replace("'", "''", $str);
-		}
-		return strtr($str, ["\\" => "\\\\", "\0" => "\\0", "\n" => "\\n", "\r" => "\\r", "\x1a" => "\\Z", "'" => "\\'", '"' => '\\"']);
+		$connection = $this->getConnection();
+		return $this->attempt(static fn(): string => $connection->real_escape_string($str));
 	}
 
 	public function isError(): bool { return $this->lastmessage !== ''; }
 	public function errorNumber(): int { return $this->lastcode; }
 	public function errorMessage(): string { return $this->lastmessage; }
 
-
-	/**
-	 * BASE3 accepts complete, already escaped SQL strings. Moodle instead scans
-	 * SQL for placeholder syntax before sending it to MySQL, including syntax
-	 * occurring inside quoted values (for example JSON containing :true).
-	 *
-	 * Move SQL string literals into Moodle parameters at this host boundary.
-	 * This also keeps JSON and other literal data out of Moodle's table-name
-	 * rewriting. No BASE3 module or SQL storage contract needs to change.
-	 *
-	 * @return array{0:string,1:array<int,string>}
-	 */
-	private function prepareSql(string $sql): array {
-		$this->loadSqlMode();
-		$statement = '';
-		$params = [];
-		$length = strlen($sql);
-
-		for ($position = 0; $position < $length; $position++) {
-			$char = $sql[$position];
-
-			// Preserve comments and identifiers without trying to bind their contents.
-			if ($char === '#' || ($char === '-' && ($sql[$position + 1] ?? '') === '-'
-				&& preg_match('/\s/', $sql[$position + 2] ?? '') === 1)) {
-				$end = strpos($sql, "\n", $position);
-				$end = $end === false ? $length : $end;
-				$statement .= substr($sql, $position, $end - $position);
-				$position = $end - 1;
-				continue;
-			}
-			if ($char === '/' && ($sql[$position + 1] ?? '') === '*') {
-				$end = strpos($sql, '*/', $position + 2);
-				if ($end === false) throw new RuntimeException('Unterminated SQL block comment.');
-				$statement .= substr($sql, $position, $end + 2 - $position);
-				$position = $end + 1;
-				continue;
-			}
-			if ($char === '`' || ($char === '"' && $this->ansiQuotes)) {
-				$start = $position;
-				$this->skipQuotedIdentifier($sql, $position, $char);
-				$statement .= substr($sql, $start, $position - $start + 1);
-				continue;
-			}
-			if ($char === "'" || $char === '"') {
-				// A MySQL literal introducer (X'AB', B'101', N'...') is not
-				// an ordinary character value and must retain its native syntax.
-				if ($char === "'" && preg_match('/(?:\\b[xXbBnN]|_[a-zA-Z0-9_]+)$/', $statement) === 1) {
-					throw new RuntimeException('Unsupported typed SQL string literal in BASE3 Moodle adapter.');
-				}
-				$params[] = $this->readSqlString($sql, $position, $char);
-				$statement .= '?';
-				continue;
-			}
-			$statement .= $char;
-		}
-
-		return [$statement, $params];
-	}
-
-	/** Reads the exact value represented by an escaped MySQL string literal. */
-	private function readSqlString(string $sql, int &$position, string $quote): string {
-		$value = '';
-		$length = strlen($sql);
-		for ($position++; $position < $length; $position++) {
-			$char = $sql[$position];
-			if ($char === '\\' && $this->backslashEscapes) {
-				if (++$position >= $length) throw new RuntimeException('Invalid trailing SQL escape.');
-				$escaped = $sql[$position];
-				$value .= match ($escaped) {
-					'0' => "\0",
-					'b' => "\x08",
-					'n' => "\n",
-					'r' => "\r",
-					't' => "\t",
-					'Z' => "\x1a",
-					'%', '_' => '\\' . $escaped,
-					default => $escaped
-				};
-				continue;
-			}
-			if ($char === $quote) {
-				if (($sql[$position + 1] ?? '') === $quote) {
-					$value .= $quote;
-					$position++;
-					continue;
-				}
-				return $value;
-			}
-			$value .= $char;
-		}
-		throw new RuntimeException('Unterminated SQL string literal.');
-	}
-
-	private function skipQuotedIdentifier(string $sql, int &$position, string $quote): void {
-		$length = strlen($sql);
-		for ($position++; $position < $length; $position++) {
-			if ($sql[$position] === $quote) {
-				if (($sql[$position + 1] ?? '') === $quote) {
-					$position++;
-					continue;
-				}
-				return;
-			}
-		}
-		throw new RuntimeException('Unterminated SQL identifier.');
-	}
-
-	private function loadSqlMode(): void {
-		if ($this->backslashEscapes !== null) return;
-		global $DB;
+	private function getConnection(): \mysqli {
 		$this->connect();
-		$raw = (string) $this->perform(fn() => $DB->get_field_sql('SELECT @@SESSION.sql_mode'));
-		$modes = array_map('trim', explode(',', strtoupper($raw)));
-		$this->backslashEscapes = !in_array('NO_BACKSLASH_ESCAPES', $modes, true);
-		$this->ansiQuotes = in_array('ANSI_QUOTES', $modes, true);
+		return $this->connection;
 	}
 
-	private function perform(callable $operation): mixed {
-		$this->lastcode = 0;
-		$this->lastmessage = '';
+	private function read(string $query, callable $reader): mixed {
+		$connection = $this->getConnection();
+		return $this->attempt(function() use ($connection, $query, $reader): mixed {
+			$result = $connection->query($query);
+			if (!$result instanceof \mysqli_result) {
+				if ($result === false) {
+					throw $this->connectionError($connection, 'BASE3 database query failed');
+				}
+				throw new RuntimeException('BASE3 expected a row result from the database query.');
+			}
+			try {
+				return $reader($result);
+			} finally {
+				$result->free();
+			}
+		});
+	}
+
+	private function attempt(callable $operation): mixed {
+		$this->clearError();
 		try {
 			return $operation();
-		} catch (\Throwable $error) {
-			$this->lastcode = (int) $error->getCode();
-			$this->lastmessage = $error->getMessage();
+		} catch (Throwable $error) {
+			$this->recordError($error);
 			throw $error;
 		}
+	}
+
+	private function connectionError(\mysqli $connection, string $context): RuntimeException {
+		$detail = trim((string) $connection->error);
+		return new RuntimeException($context . ($detail === '' ? '' : ': ' . $detail), (int) $connection->errno);
+	}
+
+	private function clearError(): void {
+		$this->lastcode = 0;
+		$this->lastmessage = '';
+	}
+
+	private function recordError(Throwable $error): void {
+		$this->lastcode = (int) $error->getCode();
+		$this->lastmessage = $error->getMessage();
 	}
 }
