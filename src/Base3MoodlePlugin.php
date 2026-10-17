@@ -27,6 +27,8 @@ use Base3Moodle\Adapter\MoodleAccesscontrol;
 use Base3Moodle\Adapter\MoodleAssetResolver;
 use Base3Moodle\Adapter\MoodleConfiguration;
 use Base3Moodle\Adapter\MoodleDatabase;
+use Base3Moodle\Adapter\MoodleFileManagerHttpService;
+use Base3Moodle\Adapter\MoodleFileUploadService;
 use Base3Moodle\Adapter\MoodleFileStorageFactory;
 use Base3Moodle\Adapter\MoodleLanguage;
 use Base3Moodle\Adapter\MoodleManagedFileStorageService;
@@ -67,6 +69,8 @@ final class Base3MoodlePlugin implements IPlugin, IBase {
 			->set(IConfigValueResolver::class, fn($c) => new ConfigValueResolver($c->get(IClassMap::class)), IContainer::SHARED | IContainer::NOOVERWRITE)
 			->set(IFileStorageFactory::class, fn() => new MoodleFileStorageFactory(), IContainer::SHARED | IContainer::NOOVERWRITE)
 			->set(IManagedFileStorageService::class, fn($c) => new MoodleManagedFileStorageService($c->get(IFileStorageFactory::class)), IContainer::SHARED | IContainer::NOOVERWRITE)
+			->set(MoodleFileUploadService::class, fn($c) => new MoodleFileUploadService($c->get(IManagedFileStorageService::class)), IContainer::SHARED)
+			->set(MoodleFileManagerHttpService::class, fn($c) => new MoodleFileManagerHttpService($c->get(IManagedFileStorageService::class), $c->get(MoodleFileUploadService::class)), IContainer::SHARED)
 			->set('workers', fn($c) => ['Base3Moodle' => fn() => new DelegateWorker($c->get(IClassMap::class), $c->get(IConfiguration::class))], IContainer::SHARED | IContainer::NOOVERWRITE);
 	}
 }
