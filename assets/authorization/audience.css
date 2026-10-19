@@ -1,0 +1,16 @@
+.base3-audience-admin {max-width:100%;padding:1rem;background:var(--bs-body-bg,#fff);color:inherit}
+.base3-audience-admin fieldset {border:1px solid #b8bec6;border-radius:.25rem;padding:1rem;margin:1rem 0;min-width:0}
+.base3-audience-admin legend {width:auto;max-width:100%;font-size:1.1rem;font-weight:600;padding:0 .5rem}
+.base3-audience-admin label {display:flex;flex-direction:column;gap:.25rem;min-width:9rem}
+.base3-audience-admin input,.base3-audience-admin select,.base3-audience-admin textarea {width:100%;max-width:100%;padding:.4rem;box-sizing:border-box}
+.base3-audience-admin .base3-audience-row {display:flex;align-items:end;gap:.5rem;flex-wrap:wrap;border-bottom:1px solid #b8bec6;padding:.75rem 0}
+.base3-audience-admin .base3-audience-row label {flex:1 1 10rem}
+.base3-audience-admin .base3-audience-config {flex:2 1 14rem}
+.base3-audience-admin .base3-audience-config label {width:100%}
+.base3-audience-admin .base3-audience-properties {display:flex;flex-wrap:wrap;gap:.5rem}
+.base3-audience-admin [data-audience-wrap][hidden],.base3-audience-admin [hidden] {display:none!important}
+.base3-audience-admin .base3-audience-hint {font-size:.85rem;line-height:1.5;margin:.5rem 0}
+.base3-audience-admin code {overflow-wrap:anywhere}
+.base3-audience-admin [role=alert] {color:#9c3030}
+.base3-audience-admin [role=status] {font-weight:600}
+@media(max-width:650px){.base3-audience-admin .base3-audience-row label,.base3-audience-admin .base3-audience-config {flex-basis:100%}}

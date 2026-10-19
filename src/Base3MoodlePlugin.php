@@ -3,6 +3,8 @@
 namespace Base3Moodle;
 
 use Base3\Accesscontrol\Api\IAccesscontrol;
+use Base3\Authorization\Api\IAuthorizationService;
+use Base3\Authorization\Api\IAuthorizationAdministrationService;
 use Base3\Api\IAssetResolver;
 use Base3\Api\IBase;
 use Base3\Api\IClassMap;
@@ -20,8 +22,10 @@ use Base3\Language\Api\ILanguage;
 use Base3\Logger\Api\ILogger;
 use Base3\Logger\ScopedDatabaseLogger\ScopedDatabaseLogger;
 use Base3\Session\Api\ISession;
+use Base3\Settings\Api\ISettingsStore;
 use Base3\Translation\Api\ITranslation;
 use Base3\Usermanager\Api\IUsermanager;
+use Base3\Usermanager\UserCriterionEvaluator;
 use Base3\Worker\DelegateWorker;
 use Base3Moodle\Adapter\MoodleAccesscontrol;
 use Base3Moodle\Adapter\MoodleAssetResolver;
@@ -36,6 +40,11 @@ use Base3Moodle\Adapter\MoodleMvcView;
 use Base3Moodle\Adapter\MoodleSession;
 use Base3Moodle\Adapter\MoodleTranslation;
 use Base3Moodle\Adapter\MoodleUsermanager;
+use Base3Moodle\Authorization\MoodleAuthorizationService;
+use Base3Moodle\Authorization\MoodleAuthorizationAdministrationService;
+use Base3Moodle\Service\MoodleFeatureConfiguration;
+use Base3Moodle\Service\MoodleGroupConfiguration;
+use Base3Moodle\Service\MoodleAudienceEditor;
 use ResourceFoundation\Api\IFileStorageFactory;
 use ResourceFoundation\Api\IManagedFileStorageService;
 
@@ -58,8 +67,26 @@ final class Base3MoodlePlugin implements IPlugin, IBase {
 			->set('session', ISession::class, IContainer::ALIAS)
 			->set(IAccesscontrol::class, fn() => new MoodleAccesscontrol(), IContainer::SHARED)
 			->set('accesscontrol', IAccesscontrol::class, IContainer::ALIAS)
-			->set(IUsermanager::class, fn() => new MoodleUsermanager(), IContainer::SHARED)
+			->set(UserCriterionEvaluator::class, fn($c) => new UserCriterionEvaluator($c->get(IClassMap::class)), IContainer::SHARED)
+			->set(MoodleFeatureConfiguration::class, fn($c) => new MoodleFeatureConfiguration(
+				$c->get(ISettingsStore::class), $c->get(UserCriterionEvaluator::class), $c->get(IClassMap::class)
+			), IContainer::SHARED)
+			->set(MoodleGroupConfiguration::class, fn($c) => new MoodleGroupConfiguration(
+				$c->get(ISettingsStore::class), $c->get(IClassMap::class), $c->get(UserCriterionEvaluator::class),
+				$c->get(MoodleFeatureConfiguration::class)
+			), IContainer::SHARED)
+			->set(IUsermanager::class, fn($c) => new MoodleUsermanager(
+				$c->get(MoodleGroupConfiguration::class), $c->get(UserCriterionEvaluator::class)
+			), IContainer::SHARED)
 			->set('usermanager', IUsermanager::class, IContainer::ALIAS)
+			->set(IAuthorizationService::class, fn($c) => new MoodleAuthorizationService(
+				$c->get(IUsermanager::class), $c->get(IClassMap::class),
+				$c->get(UserCriterionEvaluator::class), $c->get(MoodleFeatureConfiguration::class)
+			), IContainer::SHARED)
+			->set(IAuthorizationAdministrationService::class, fn() => new MoodleAuthorizationAdministrationService(), IContainer::SHARED)
+			->set(MoodleAudienceEditor::class, fn($c) => new MoodleAudienceEditor(
+				$c->get(IClassMap::class), $c->get(UserCriterionEvaluator::class)
+			), IContainer::SHARED)
 			->set(ILanguage::class, fn() => new MoodleLanguage(), IContainer::SHARED)
 			->set(ITranslation::class, fn($c) => new MoodleTranslation($c->get(ILanguage::class), $c->get(IModuleRegistry::class)), IContainer::SHARED)
 			->set(IMvcView::class, fn($c) => new MoodleMvcView($c->get(ILanguage::class), $c->get(IModuleRegistry::class)))

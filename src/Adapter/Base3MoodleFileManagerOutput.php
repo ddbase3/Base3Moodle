@@ -3,6 +3,8 @@
 namespace Base3Moodle\Adapter;
 
 use Base3\Api\IOutput;
+use Base3\Authorization\Api\IAuthorizationService;
+use Base3\Authorization\Dto\AuthorizationRequest;
 use Base3\Api\IRequest;
 use Base3\Usermanager\Api\IUsermanager;
 use Base3\Usermanager\Permission;
@@ -17,6 +19,7 @@ final class Base3MoodleFileManagerOutput implements IOutput {
 	public function __construct(
 		private readonly IRequest $request,
 		private readonly IUsermanager $usermanager,
+		private readonly IAuthorizationService $authorization,
 		private readonly IBase3MoodleSettings $settings,
 		private readonly MoodleFileManagerHttpService $fileManagerHttpService
 	) {}
@@ -28,7 +31,9 @@ final class Base3MoodleFileManagerOutput implements IOutput {
 	public function getOutput(string $out = 'html', bool $final = false): string {
 		$userId = (int) ($this->usermanager->getUser()?->id ?? 0);
 		if ($userId <= 0
-			|| !$this->usermanager->can(Permission::for('moodle', 'moodle/site:config'))
+			|| !$this->authorization->decide(new AuthorizationRequest(
+				$this->authorization->getDefaultAuthority(), Permission::for('moodle', 'moodle/site:config')
+			))->isAllowed()
 			|| !confirm_sesskey()) {
 			return $this->errorResponse(403, 'BASE3 access permission or sesskey missing.');
 		}

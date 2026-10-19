@@ -17,9 +17,23 @@ namespace Base3\Usermanager {
 }
 
 namespace Base3\Usermanager\Api {
-	interface IUsermanager {
-		public function getUser();
-		public function can(\Base3\Usermanager\Permission $permission): bool;
+	interface IUsermanager { public function getUser(); public function getGroups(); }
+}
+
+namespace Base3\Authorization\Dto {
+	final readonly class AuthorizationRequest {
+		public function __construct(public string $authority, public \Base3\Usermanager\Permission $permission) {}
+	}
+	final readonly class AuthorizationDecision {
+		public function __construct(private bool $allowed) {}
+		public function isAllowed(): bool { return $this->allowed; }
+	}
+}
+
+namespace Base3\Authorization\Api {
+	interface IAuthorizationService {
+		public function getDefaultAuthority(): string;
+		public function decide(\Base3\Authorization\Dto\AuthorizationRequest $request): \Base3\Authorization\Dto\AuthorizationDecision;
 	}
 }
 
@@ -32,7 +46,10 @@ namespace Base3\Translation\Api {
 }
 
 namespace Base3Moodle\Api {
-	interface IBase3MoodleSettings { public function getAdministrationConfig(): array; }
+	interface IBase3MoodleSettings {
+		public function getAdministrationConfig(): array;
+		public function getVisibleAdministrationConfig(): array;
+	}
 }
 
 namespace Base3Moodle\Adapter {
@@ -47,6 +64,9 @@ namespace Base3Moodle\Adapter {
 
 namespace {
 	use Base3\Api\IRequest;
+	use Base3\Authorization\Api\IAuthorizationService;
+	use Base3\Authorization\Dto\AuthorizationRequest;
+	use Base3\Authorization\Dto\AuthorizationDecision;
 	use Base3\LinkTarget\Api\ILinkTargetService;
 	use Base3\Translation\Api\ITranslation;
 	use Base3\Usermanager\Api\IUsermanager;
@@ -74,11 +94,17 @@ namespace {
 	}
 
 	final class TestUsermanager implements IUsermanager {
-		public function __construct(private bool $siteConfigurationAllowed, private ?object $user) {}
+		public function __construct(private ?object $user) {}
 		public function getUser(): ?object { return $this->user; }
-		public function can(Permission $permission): bool {
-			return $this->siteConfigurationAllowed && $permission->scope === 'moodle'
-				&& $permission->permission === 'moodle/site:config';
+		public function getGroups() { return []; }
+	}
+
+	final class TestAuthorizationService implements IAuthorizationService {
+		public function __construct(private bool $allowed) {}
+		public function getDefaultAuthority(): string { return 'moodle'; }
+		public function decide(AuthorizationRequest $request): AuthorizationDecision {
+			return new AuthorizationDecision($this->allowed && $request->permission->scope === 'moodle'
+				&& $request->permission->permission === 'moodle/site:config');
 		}
 	}
 
@@ -89,6 +115,7 @@ namespace {
 	final class TestSettings implements IBase3MoodleSettings {
 		public function __construct(private array $tabs) {}
 		public function getAdministrationConfig(): array { return $this->tabs; }
+		public function getVisibleAdministrationConfig(): array { return $this->tabs; }
 	}
 
 	function verify(bool $result, string $message): void {
@@ -101,7 +128,7 @@ namespace {
 	require_once __DIR__ . '/../../../Base3MoodleLab/src/Service/Base3MoodleLabSettings.php';
 
 	ob_start();
-	$lab = new Base3MoodleLabSettings(new TestTranslation(), new MoodleLinkTargetService());
+	$lab = new Base3MoodleLabSettings(new TestTranslation(), new MoodleLinkTargetService(), new TestUsermanager(null));
 	$tabs = $lab->getAdministrationConfig();
 	$config = null;
 	foreach ($tabs as $tab) {
@@ -133,27 +160,27 @@ namespace {
 	$request = new TestRequest(['fm_action' => 'uploadChunk']);
 	$GLOBALS['sesskey_valid'] = true;
 	$GLOBALS['sesskey_checks'] = 0;
-	$output = new Base3MoodleFileManagerOutput($request, new TestUsermanager(false, (object) ['id' => 42]), $settings, $handler);
+	$output = new Base3MoodleFileManagerOutput($request, new TestUsermanager((object) ['id' => 42]), new TestAuthorizationService(false), $settings, $handler);
 	http_response_code(200);
 	verify(json_decode($output->getOutput('json', true), true) === ['message' => 'BASE3 access permission or sesskey missing.'] && http_response_code() === 403, 'missing site configuration permission denied');
 	verify($GLOBALS['sesskey_checks'] === 0, 'permission checked before sesskey');
 
-	$output = new Base3MoodleFileManagerOutput($request, new TestUsermanager(true, null), $settings, $handler);
+	$output = new Base3MoodleFileManagerOutput($request, new TestUsermanager(null), new TestAuthorizationService(true), $settings, $handler);
 	http_response_code(200);
 	verify(json_decode($output->getOutput('json', true), true) === ['message' => 'BASE3 access permission or sesskey missing.'] && http_response_code() === 403, 'missing login identity denied');
 
 	$GLOBALS['sesskey_valid'] = false;
-	$output = new Base3MoodleFileManagerOutput($request, new TestUsermanager(true, (object) ['id' => 42]), $settings, $handler);
+	$output = new Base3MoodleFileManagerOutput($request, new TestUsermanager((object) ['id' => 42]), new TestAuthorizationService(true), $settings, $handler);
 	http_response_code(200);
 	verify(json_decode($output->getOutput('json', true), true) === ['message' => 'BASE3 access permission or sesskey missing.'] && http_response_code() === 403, 'invalid Moodle sesskey denied');
 
 	$GLOBALS['sesskey_valid'] = true;
-	$output = new Base3MoodleFileManagerOutput($request, new TestUsermanager(true, (object) ['id' => 42]), new TestSettings([]), $handler);
+	$output = new Base3MoodleFileManagerOutput($request, new TestUsermanager((object) ['id' => 42]), new TestAuthorizationService(true), new TestSettings([]), $handler);
 	$missingOwner = false;
 	try { $output->getOutput('json', true); } catch (\RuntimeException $error) { $missingOwner = $error->getMessage() === 'Chatbot administration storage owner is not configured.'; }
 	verify($missingOwner, 'no fallback for missing configured owner');
 
-	$output = new Base3MoodleFileManagerOutput($request, new TestUsermanager(true, (object) ['id' => 42]), $settings, $handler);
+	$output = new Base3MoodleFileManagerOutput($request, new TestUsermanager((object) ['id' => 42]), new TestAuthorizationService(true), $settings, $handler);
 	$invoked = false;
 	try { $output->getOutput('json', true); } catch (\RuntimeException $error) { $invoked = $error->getMessage() === 'HTTP handler reached'; }
 	verify($invoked, 'authorized upload reaches existing FileManager service');
@@ -161,7 +188,7 @@ namespace {
 		'action' => 'uploadChunk', 'group' => 'chatbot', 'name' => 'default', 'userId' => 42, 'maxFileSize' => 50 * 1024 * 1024
 	]], 'original owner, action, user and max size preserved');
 
-	$output = new Base3MoodleFileManagerOutput(new TestRequest(['fm_action' => 'download']), new TestUsermanager(true, (object) ['id' => 42]), $settings, $handler);
+	$output = new Base3MoodleFileManagerOutput(new TestRequest(['fm_action' => 'download']), new TestUsermanager((object) ['id' => 42]), new TestAuthorizationService(true), $settings, $handler);
 	try { $output->getOutput('json', true); } catch (\RuntimeException $error) { verify($error->getMessage() === 'HTTP handler reached', 'download reaches existing FileManager service'); }
 	verify((MoodleFileManagerHttpService::$calls[1]['action'] ?? '') === 'download', 'download retains action');
 

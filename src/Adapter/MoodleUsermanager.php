@@ -7,9 +7,19 @@ use Base3\Usermanager\Group;
 use Base3\Usermanager\Permission;
 use Base3\Usermanager\Role;
 use Base3\Usermanager\User;
+use Base3\Usermanager\UserCriterionEvaluator;
+use Base3Moodle\Service\MoodleGroupConfiguration;
 
-/** Adapts Moodle identities, site roles, current-course groups and capabilities to BASE3 RBAC. */
+/** Adapts Moodle identities, native roles and permissions to the single BASE3 authorization model. */
 final class MoodleUsermanager implements IUsermanager {
+
+	private ?array $groups = null;
+	private ?array $roles = null;
+
+	public function __construct(
+		private readonly MoodleGroupConfiguration $groupConfiguration,
+		private readonly UserCriterionEvaluator $evaluator
+	) {}
 
 	public function getUser() {
 		global $USER;
@@ -23,25 +33,31 @@ final class MoodleUsermanager implements IUsermanager {
 	}
 
 	public function getGroups() {
-		global $USER, $COURSE;
-		if (!isloggedin() || isguestuser()) return [$this->groupObject('anonymous')];
-		$groups = [$this->groupObject('authenticated')];
-		if (is_siteadmin()) $groups[] = $this->groupObject('administration');
-		if (isset($COURSE->id) && (int) $COURSE->id > SITEID) {
-			foreach (groups_get_user_groups((int) $COURSE->id, (int) $USER->id)[0] ?? [] as $id) {
-				$groups[] = $this->groupObject('course:' . $COURSE->id . ':group:' . $id);
-			}
+		if ($this->groups !== null) return $this->groups;
+		$user = $this->getUser();
+		$groups = [];
+		foreach ($this->groupConfiguration->getEntries() as $entry) {
+			if ($this->evaluator->matches($user, $entry['criteria'])) $groups[$entry['group']->name] = $entry['group'];
 		}
-		return $groups;
+		return $this->groups = array_values($groups);
 	}
 
 	public function getRoles() {
+		if ($this->roles !== null) return $this->roles;
 		global $USER;
-		if (!isloggedin() || isguestuser()) return [];
-		$roles = get_user_roles(\context_system::instance(), (int) $USER->id, true);
-		$result = array_map(fn($role) => $this->roleObject((array) $role), $roles);
-		if (is_siteadmin()) $result[] = Role::fromArray(['id' => 'admin', 'name' => 'admin', 'label' => 'Administrator', 'permissions' => []]);
-		return $result;
+		if (!isloggedin() || isguestuser()) return $this->roles = [];
+		// BASE3 global role selectors use system context. Course roles can be selected
+		// explicitly with MoodleRoleCriterion::context_id and native parent resolution.
+		$assignments = get_user_roles(\context_system::instance(), (int)$USER->id, true);
+		$result = [];
+		foreach ($assignments as $assignment) {
+			$role = $this->roleObject((array)$assignment);
+			$result[(string)$role->id] = $role;
+		}
+		if (is_siteadmin()) $result['admin'] = Role::fromArray([
+			'id' => 'admin', 'name' => 'admin', 'label' => 'Administrator', 'permissions' => []
+		]);
+		return $this->roles = array_values($result);
 	}
 
 	public function getPermissions() {
@@ -61,17 +77,6 @@ final class MoodleUsermanager implements IUsermanager {
 			if ((string) $candidate->name === $name) return true;
 		}
 		return false;
-	}
-
-	public function can(Permission $permission): bool {
-		$scope = strtolower((string) $permission->scope);
-		$capability = (string) $permission->permission;
-		if (($scope === 'system' || $scope === 'entry') && $capability === 'admin') return is_siteadmin();
-		if ($scope !== 'moodle' || $capability === '') return false;
-		$context = $permission->target !== null
-			? \context::instance_by_id((int) $permission->target, IGNORE_MISSING)
-			: \context_system::instance();
-		return $context !== false && has_capability($capability, $context);
 	}
 
 	public function registUser($userid, $password, $data = null) {
@@ -109,7 +114,7 @@ final class MoodleUsermanager implements IUsermanager {
 	}
 
 	public function getAllGroups() {
-		return array_map([$this, 'groupObject'], ['anonymous', 'authenticated', 'administration']);
+		return $this->groupConfiguration->getGroups();
 	}
 
 	public function getAllRoles() {
@@ -144,7 +149,7 @@ final class MoodleUsermanager implements IUsermanager {
 	public function revokeRoleFromGroup($groupid, Role $role): bool { return false; }
 
 	public function addPermissionToRole(Role $role, Permission $permission): bool {
-		if (!is_siteadmin() || $permission->scope !== 'moodle' || $permission->target !== null) return false;
+		if (!is_siteadmin() || $permission->scope !== 'moodle') return false;
 		$id = $this->getRoleId($role);
 		if ($id === 0 || get_capability_info((string) $permission->permission) === false) return false;
 		assign_capability((string) $permission->permission, CAP_ALLOW, $id, \context_system::instance()->id, true);
@@ -152,7 +157,7 @@ final class MoodleUsermanager implements IUsermanager {
 	}
 
 	public function removePermissionFromRole(Role $role, Permission $permission): bool {
-		if (!is_siteadmin() || $permission->scope !== 'moodle' || $permission->target !== null) return false;
+		if (!is_siteadmin() || $permission->scope !== 'moodle') return false;
 		$id = $this->getRoleId($role);
 		if ($id === 0) return false;
 		unassign_capability((string) $permission->permission, $id, \context_system::instance()->id);
@@ -177,12 +182,8 @@ final class MoodleUsermanager implements IUsermanager {
 		]);
 	}
 
-	private function groupObject(string $name): Group {
-		return Group::fromArray(['id' => $name, 'name' => $name, 'info' => 'Moodle derived group', 'roles' => []]);
-	}
-
 	private function roleObject(array $role): Role {
 		$name = (string) ($role['shortname'] ?? $role['name'] ?? '');
-		return Role::fromArray(['id' => $role['id'] ?? $name, 'name' => $name, 'label' => (string) ($role['name'] ?? $name), 'permissions' => []]);
+		return Role::fromArray(['id' => $role['roleid'] ?? $role['id'] ?? $name, 'name' => $name, 'label' => (string) ($role['name'] ?? $name), 'permissions' => []]);
 	}
 }

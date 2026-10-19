@@ -26,3 +26,46 @@ outside its scope. Deployment-specific controls, log/backup retention,
 processor information, and any other plugins' data flow remain to be
 assessed by the operator. The existing ClientStack FileManager UI requires
 live keyboard and assistive-technology verification for WCAG 2.2 AA.
+
+## BASE3 groups, features and native authorization (19 October 2026)
+
+`MoodleAuthorizationService` reads the current Moodle-authenticated identity,
+checks `is_siteadmin()` or `has_capability()` for native rights, and evaluates
+BASE3 feature audiences against discovered group and criterion expressions.
+`MoodleRoleCriterion` calls Moodle's native role resolver for the chosen user
+and context; `MoodleCourseGroupCriterion` calls native course-group services.
+Both resolve attributes in memory and do not replicate Moodle role or course
+group records. Request-local caching of role IDs is limited to the PHP request.
+
+The site-supplied `ISettingsStore` persists managed group definitions and
+criteria in `base3moodle/groups`, and feature audience overrides in
+`base3_authorization_features/catalog`. Depending on enabled criteria, these
+records may contain Moodle user IDs, role IDs, context IDs, course/group IDs,
+exact user login names, full email addresses, email domains, and other
+plugin-specific personal attributes. Code-defined group expressions are in
+plugin source; source/deployment backups may consequently contain personal
+data when maintainers configure bootstrap identities.
+
+Group and feature editors require native Moodle site administration AND BASE3
+`development` membership, including for direct endpoint calls. Mutating POSTs
+require a valid Moodle session key. A user with only a BASE3 development
+assignment cannot acquire native Moodle administrator status from these
+rules. The browser loads local authorization assets, and the existing
+same-origin `local/base3/ajax.php` endpoint handles edits; no separate remote
+recipient, external transfer or authorization data store is introduced by
+this change.
+
+Removing a managed group removes its current settings record only if no
+feature refers to it. Removing a feature override through an administrator's
+host settings processes does not delete Moodle user accounts, course-group
+records, roles or historical backup copies. The source does not establish
+a universal retention policy for host-managed rules, Moodle audit logs, or
+backups. The Moodle operator must assess configured plugin criteria, access
+to source containing bootstrap identities, backups, erasure requests and
+external integrations. The interface-level implementation does not establish
+GDPR compliance for every deployment.
+
+The new repeated-assignment editor provides labels, keyboard-capable controls,
+server-side validation, session-key checks and live feedback. A real Moodle
+browser/theme with keyboard and assistive technology must still be checked
+against BASE3 WCAG 2.2 AA requirements before a production release.
