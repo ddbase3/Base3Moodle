@@ -48,15 +48,16 @@ data when maintainers configure bootstrap identities.
 
 Group and feature editors require native Moodle site administration AND BASE3
 `development` membership, including for direct endpoint calls. Mutating POSTs
-require a valid Moodle session key. A user with only a BASE3 development
+require a valid Moodle session key and the ClientStack editor's separate
+BASE3 session CSRF token. A user with only a BASE3 development
 assignment cannot acquire native Moodle administrator status from these
-rules. The browser loads local authorization assets, and the existing
-same-origin `local/base3/ajax.php` endpoint handles edits; no separate remote
-recipient, external transfer or authorization data store is introduced by
-this change.
+rules. The unmodified ClientStack Group/Feature displays include the shared
+styles/scripts. The existing same-origin `local/base3/ajax.php` endpoint
+handles edits; no separate remote recipient, external transfer or
+administration data store is introduced by the replacement.
 
 Removing a managed group removes its current settings record only if no
-feature refers to it. Removing a feature override through an administrator's
+feature refers to it and it is not the current configured fallback. Removing a feature override through an administrator's
 host settings processes does not delete Moodle user accounts, course-group
 records, roles or historical backup copies. The source does not establish
 a universal retention policy for host-managed rules, Moodle audit logs, or
@@ -65,7 +66,12 @@ to source containing bootstrap identities, backups, erasure requests and
 external integrations. The interface-level implementation does not establish
 GDPR compliance for every deployment.
 
-The new repeated-assignment editor provides labels, keyboard-capable controls,
-server-side validation, session-key checks and live feedback. A real Moodle
-browser/theme with keyboard and assistive technology must still be checked
-against BASE3 WCAG 2.2 AA requirements before a production release.
+The shared ClientStack repeated-assignment editor provides labeled controls,
+keyboard-capable form interactions, server-side validation, CSRF checks and
+status feedback. The optional group fallback persists only the chosen logical
+group name in the existing `base3moodle/groups` settings record; no Moodle
+identity or native role record is copied. Membership for a fallback group is
+computed transiently for authenticated users with no specific BASE3 match;
+privileged `development` and `administration` fallbacks are prohibited. A
+real Moodle browser/theme with keyboard and assistive technology must still
+be checked against BASE3 WCAG 2.2 AA before production release.

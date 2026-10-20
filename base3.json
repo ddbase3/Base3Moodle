@@ -6,6 +6,7 @@
   "description": "Moodle host adapters for the BASE3 runtime.",
   "dependencies": {
     "Base3Framework": ">=4.10.0",
-    "ResourceFoundation": ">=4.5.0"
+    "ResourceFoundation": ">=4.5.0",
+    "UiFoundation": ">=4.3.0"
   }
 }

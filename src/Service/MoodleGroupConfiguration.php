@@ -61,8 +61,15 @@ final class MoodleGroupConfiguration {
 	/** @return list<Group> */
 	public function getGroups(): array { return array_map(static fn(array $e): Group => $e['group'], $this->getEntries()); }
 
-	/** Replaces all editable criteria in one settings write without altering code-owned membership. */
-	public function replaceAll(array $rules): void {
+	/** Return the optional, explicitly selected nonprivileged fallback for authenticated users. */
+	public function getDefaultGroup(): string {
+		$name = $this->load()['defaultGroup'];
+		if ($name !== '') $this->assertDefaultGroup($name, $this->getEntries());
+		return $name;
+	}
+
+	/** Replaces editable criteria and optionally the default group in one settings write. */
+	public function replaceAll(array $rules, ?string $defaultGroup = null): void {
 		$data = $this->load();
 		$entries = $this->getEntries();
 		$known = [];
@@ -71,6 +78,10 @@ final class MoodleGroupConfiguration {
 		foreach ($rules as $name => $expression) {
 			if (!is_array($expression)) throw new InvalidArgumentException('Invalid group audience.');
 			$this->evaluator->validate($expression);
+		}
+		if ($defaultGroup !== null) {
+			if ($defaultGroup !== '') $this->assertDefaultGroup($defaultGroup, $entries);
+			$data['defaultGroup'] = $defaultGroup;
 		}
 		foreach ($known as $name => $source) {
 			$expr = $rules[$name] ?? [];
@@ -93,18 +104,34 @@ final class MoodleGroupConfiguration {
 	public function remove(string $name): void {
 		$data = $this->load();
 		if (!isset($data['groups'][$name])) throw new InvalidArgumentException('Only managed groups can be removed.');
+		if ($name === $this->getDefaultGroup()) throw new InvalidArgumentException('BASE3 group is the configured fallback.');
 		if ($this->features->referencesGroup($name)) throw new InvalidArgumentException('BASE3 group is still referenced by a feature.');
 		unset($data['groups'][$name]);
 		$this->save($data);
 	}
 
-	/** @return array{criteria:array,groups:array} */
+	/** @return array{criteria:array,groups:array,defaultGroup:string} */
 	private function load(): array {
 		if ($this->settingsCache !== null) return $this->settingsCache;
 		$data = $this->settings->get(self::SETTINGS_GROUP, self::SETTINGS_NAME, []);
-		if (array_diff(array_keys($data), ['criteria', 'groups']) !== []
-			|| !is_array($data['criteria'] ?? []) || !is_array($data['groups'] ?? [])) throw new InvalidArgumentException('Invalid group settings schema.');
-		return $this->settingsCache = ['criteria' => $data['criteria'] ?? [], 'groups' => $data['groups'] ?? []];
+		if (array_diff(array_keys($data), ['criteria', 'groups', 'defaultGroup']) !== []
+			|| !is_array($data['criteria'] ?? []) || !is_array($data['groups'] ?? [])
+			|| !is_string($data['defaultGroup'] ?? '')) throw new InvalidArgumentException('Invalid group settings schema.');
+		return $this->settingsCache = [
+			'criteria' => $data['criteria'] ?? [], 'groups' => $data['groups'] ?? [],
+			'defaultGroup' => $data['defaultGroup'] ?? ''
+		];
+	}
+
+	/** @param list<array> $entries Current code-owned and managed group catalog */
+	private function assertDefaultGroup(string $name, array $entries): void {
+		if (in_array($name, ['development', 'administration'], true)) {
+			throw new InvalidArgumentException('Privileged groups cannot be assigned as the fallback.');
+		}
+		foreach ($entries as $entry) {
+			if ((string)$entry['group']->name === $name && $entry['editable']) return;
+		}
+		throw new InvalidArgumentException('Fallback group must be an existing editable BASE3 group.');
 	}
 
 	private function save(array $data): void {

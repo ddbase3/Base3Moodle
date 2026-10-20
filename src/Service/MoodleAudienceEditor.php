@@ -7,7 +7,7 @@ use Base3\Usermanager\Api\IUserCriterion;
 use Base3\Usermanager\UserCriterionEvaluator;
 use InvalidArgumentException;
 
-/** One form-to-expression translator for both Moodle-hosted administration screens. */
+/** Moodle criterion and row codec for the unmodified shared ClientStack administration forms. */
 final class MoodleAudienceEditor {
 
 	public function __construct(

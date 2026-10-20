@@ -36,8 +36,18 @@ final class MoodleUsermanager implements IUsermanager {
 		if ($this->groups !== null) return $this->groups;
 		$user = $this->getUser();
 		$groups = [];
-		foreach ($this->groupConfiguration->getEntries() as $entry) {
+		$entries = $this->groupConfiguration->getEntries();
+		foreach ($entries as $entry) {
 			if ($this->evaluator->matches($user, $entry['criteria'])) $groups[$entry['group']->name] = $entry['group'];
+		}
+		// The generic authenticated group does not count as an explicit audience assignment.
+		// A fallback never grants development or administration membership.
+		$matched = array_diff(array_keys($groups), ['authenticated', 'anonymous']);
+		if ($user !== null && $matched === []) {
+			$default = $this->groupConfiguration->getDefaultGroup();
+			foreach ($entries as $entry) {
+				if ($default !== '' && $entry['group']->name === $default) $groups[$default] = $entry['group'];
+			}
 		}
 		return $this->groups = array_values($groups);
 	}

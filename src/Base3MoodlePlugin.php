@@ -42,6 +42,8 @@ use Base3Moodle\Adapter\MoodleTranslation;
 use Base3Moodle\Adapter\MoodleUsermanager;
 use Base3Moodle\Authorization\MoodleAuthorizationService;
 use Base3Moodle\Authorization\MoodleAuthorizationAdministrationService;
+use Base3Moodle\Authorization\MoodleAudienceAdministrationService;
+use UiFoundation\Api\IAuthorizationAudienceAdministrationService;
 use Base3Moodle\Service\MoodleFeatureConfiguration;
 use Base3Moodle\Service\MoodleGroupConfiguration;
 use Base3Moodle\Service\MoodleAudienceEditor;
@@ -84,6 +86,11 @@ final class Base3MoodlePlugin implements IPlugin, IBase {
 				$c->get(UserCriterionEvaluator::class), $c->get(MoodleFeatureConfiguration::class)
 			), IContainer::SHARED)
 			->set(IAuthorizationAdministrationService::class, fn() => new MoodleAuthorizationAdministrationService(), IContainer::SHARED)
+			->set(IAuthorizationAudienceAdministrationService::class, fn($c) => new MoodleAudienceAdministrationService(
+				$c->get(IAuthorizationService::class), $c->get(IUsermanager::class),
+				$c->get(MoodleGroupConfiguration::class), $c->get(MoodleFeatureConfiguration::class),
+				$c->get(MoodleAudienceEditor::class), $c->get(IClassMap::class)
+			), IContainer::SHARED)
 			->set(MoodleAudienceEditor::class, fn($c) => new MoodleAudienceEditor(
 				$c->get(IClassMap::class), $c->get(UserCriterionEvaluator::class)
 			), IContainer::SHARED)

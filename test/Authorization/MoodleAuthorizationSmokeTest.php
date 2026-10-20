@@ -5,7 +5,8 @@
 $modules = dirname(__DIR__, 3);
 spl_autoload_register(static function(string $class) use ($modules): void {
 	foreach (['Base3\\' => 'Base3Framework', 'Base3Moodle\\' => 'Base3Moodle',
-		'Base3MoodleLab\\' => 'Base3MoodleLab', 'PulseCore\\' => 'PulseCore'] as $prefix => $module) {
+		'Base3MoodleLab\\' => 'Base3MoodleLab', 'PulseCore\\' => 'PulseCore',
+		'UiFoundation\\' => 'UiFoundation', 'ClientStack\\' => 'ClientStack'] as $prefix => $module) {
 		if (!str_starts_with($class, $prefix)) continue;
 		$file = $modules . '/' . $module . '/src/' . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
 		if (is_file($file)) require_once $file;
@@ -145,3 +146,99 @@ check($roleMatchedAuthorization->decide($checkFeature)->isAllowed(),
     'Feature audience can reference the explicitly granted development group');
 check($store->saves === 5, 'role-group and feature audience assignments each persist as one host settings write');
 echo "MoodleAuthorizationSmokeTest OK.\n";
+
+// Host administration adapter and the exact shared ClientStack template contracts.
+$DB = new class {
+	public function get_records(string $table, array $conditions = [], string $sort = '', string $fields = '*'): array {
+		if ($table === 'role') return [(object)['id' => 7, 'shortname' => 'manager']];
+		throw new RuntimeException('Unexpected Moodle database read in audience smoke test.');
+	}
+};
+$forbidden = new \Base3Moodle\Authorization\MoodleAudienceAdministrationService(
+	$service, $users, $groups, $features, $editor, $map
+);
+$GLOBALS['siteAdmin'] = true;
+try { $forbidden->getGroupView(); throw new RuntimeException('Missing BASE3 development guard.'); }
+catch (RuntimeException $error) {
+	check($error->getMessage() === 'BASE3 development membership is required.', 'site administrator without development membership cannot inspect groups');
+}
+$GLOBALS['siteAdmin'] = false;
+$admin = new \Base3Moodle\Authorization\MoodleAudienceAdministrationService(
+	$roleMatchedAuthorization, $roleMatchedUsermanager, $groups, $features, $editor, $map
+);
+try { $admin->replaceFeatureRules(['pulsecoreplayfeature' => []]); throw new RuntimeException('Missing Moodle administrator guard.'); }
+catch (RuntimeException $error) {
+	check($error->getMessage() === 'Moodle site administration is required.', 'developer without native Moodle administration cannot save features');
+}
+$GLOBALS['siteAdmin'] = true;
+$admin->assertCanAdminister();
+check($admin instanceof \UiFoundation\Api\IAuthorizationAudienceAdministrationService, 'Moodle uses unchanged UiFoundation administration contract');
+$groupView = $admin->getGroupView();
+$groupRows = array_column($groupView['entries'], null, 'name');
+check(isset($groupRows['development']) && $groupRows['development']['codeCriteria'] !== []
+	&& $groupRows['development']['source'] === 'code' && $groupRows['development']['editable'], 'existing code-owned group criteria remain visible and separate');
+check(($groupView['defaultGroup'] ?? null) === ''
+	&& ($groupView['roleOptions'][0] ?? null) === ['id' => 7, 'label' => 'manager']
+	&& isset($groupView['criterionOptions'][0]['schema']), 'group data uses shared template shape with Moodle role IDs and criterion schemas');
+$featureView = $admin->getFeatureView();
+check(($featureView['rows'][0]['name'] ?? null) === 'pulsecoreplayfeature'
+	&& ($featureView['rows'][0]['rules'][0]['value'] ?? null) === 'development'
+	&& in_array('marketing', $featureView['groups'], true), 'feature data uses shared template shape and preserves stored audiences');
+$previousSaves = $store->saves;
+try { $admin->replaceGroupRules(['authenticated' => []], ''); throw new RuntimeException('Protected group unexpectedly editable.'); }
+catch (InvalidArgumentException) { check($store->saves === $previousSaves, 'locked code groups cannot be modified through shared form'); }
+try { $admin->replaceFeatureRules(['made_up_feature' => []]); throw new RuntimeException('Unknown feature unexpectedly editable.'); }
+catch (InvalidArgumentException) { check($store->saves === $previousSaves, 'unknown features cannot be modified through shared form'); }
+try { $admin->replaceGroupRules([], 'development'); throw new RuntimeException('Privileged fallback unexpectedly accepted.'); }
+catch (InvalidArgumentException) { check($store->saves === $previousSaves, 'privileged groups cannot become the fallback'); }
+$admin->replaceGroupRules([
+	'development' => [['kind' => 'role', 'value' => '7']],
+	'administration' => [], 'marketing' => []
+], 'marketing');
+check($store->saves === $previousSaves + 1 && $groups->getDefaultGroup() === 'marketing'
+	&& $groups->getEntries()[0]['source'] === 'code', 'group form persists all editable criteria and nonprivileged fallback in one settings write');
+check($groupRows['development']['codeCriteria'] === (new \Base3MoodleLab\Group\MoodleLabDevelopmentGroup())->getCriteria(),
+	'fixed source-owned development criteria are unchanged by edited rules');
+try { $admin->removeGroup('marketing'); throw new RuntimeException('Fallback group unexpectedly removed.'); }
+catch (InvalidArgumentException) { check($groups->getDefaultGroup() === 'marketing', 'configured fallback group cannot be deleted'); }
+$originalUser = $USER;
+$USER = (object)['id' => 99, 'username' => 'member', 'firstname' => 'Ordinary', 'lastname' => 'Member',
+	'deleted' => 0, 'email' => 'member@example.org', 'lang' => 'en'];
+$GLOBALS['siteAdmin'] = false;
+$memberGroups = (new \Base3Moodle\Adapter\MoodleUsermanager($groups, $evaluator))->getGroups();
+check(in_array('marketing', array_map(static fn($group): string => $group->name, $memberGroups), true)
+	&& !in_array('development', array_map(static fn($group): string => $group->name, $memberGroups), true),
+	'nonprivileged fallback applies only to authenticated users without specific group matches');
+$USER = $originalUser;
+$GLOBALS['siteAdmin'] = true;
+$previousSaves = $store->saves;
+$admin->replaceFeatureRules(['pulsecoreplayfeature' => [['kind' => 'group', 'value' => 'development']]]);
+check($store->saves === $previousSaves + 1 && $features->getAudience(new \PulseCore\Feature\PulseCorePlayFeature()) === ['any' => [['group' => 'development']]],
+	'feature edits use the existing persisted audience schema and one settings write');
+check(\ClientStack\Display\AuthorizationGroupsDisplay::getName() === 'authorizationgroupsdisplay'
+	&& \ClientStack\Display\AuthorizationFeaturesDisplay::getName() === 'authorizationfeaturesdisplay',
+	'both shared ClientStack display classes are used unchanged');
+$renderer = new class {
+	public array $_ = [];
+	public function render(string $file, array $data): string {
+		$this->_ = $data;
+		ob_start();
+		try { require $file; return (string)ob_get_clean(); }
+		catch (Throwable $error) { ob_end_clean(); throw $error; }
+	}
+};
+$sharedTemplates = $modules . '/ClientStack/tpl/Display/';
+$groupHtml = $renderer->render($sharedTemplates . 'AuthorizationGroupsDisplay.php', array_merge(
+	$admin->getGroupView(), ['endpoint' => '/local/base3/ajax.php', 'csrf' => 'test-token', 'translations' => [], 'message' => '']
+));
+check(str_contains($groupHtml, 'data-base3-display="authorizationgroupsdisplay"')
+	&& str_contains($groupHtml, 'base3_default_group') && str_contains($groupHtml, 'base3_group_csrf'),
+	'common groups template renders current Moodle groups with shared controls');
+$featureHtml = $renderer->render($sharedTemplates . 'AuthorizationFeaturesDisplay.php', array_merge(
+	$admin->getFeatureView(), ['endpoint' => '/local/base3/ajax.php', 'csrf' => 'test-token', 'translations' => [], 'message' => '']
+));
+check(str_contains($featureHtml, 'data-base3-display="authorizationfeaturesdisplay"')
+	&& str_contains($featureHtml, 'base3_feature_csrf') && str_contains($featureHtml, 'pulsecoreplayfeature'),
+	'common features template renders persisted Moodle audiences');
+echo "Moodle shared administration contract and templates OK.\n";
+
