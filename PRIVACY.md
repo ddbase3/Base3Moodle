@@ -75,3 +75,24 @@ computed transiently for authenticated users with no specific BASE3 match;
 privileged `development` and `administration` fallbacks are prohibited. A
 real Moodle browser/theme with keyboard and assistive technology must still
 be checked against BASE3 WCAG 2.2 AA before production release.
+
+## Native paginated user search (21 October 2026)
+
+`src/Adapter/MoodleUsermanager.php::searchUsers()` uses the existing Moodle
+user directory to search native user IDs, logins, first/last and composed
+names, and email addresses. Searches are performed only when the current
+Moodle actor has `moodle/user:update` at system context; the ClientStack HTTP
+caller remains responsible for additional BASE3 authorization and CSRF
+verification. Moodle's database API applies literal escaping to search terms,
+binds all query values and limits returned records with native pagination.
+
+The query fetches only account identity fields (including the supported Moodle
+name components and language). The adapter maps returned records into BASE3
+`User` objects without per-result role, group or administrative-privilege
+resolution. Deleted accounts and the guest account are excluded; suspended
+and unconfirmed records may appear because they are still active native
+records. The implementation creates no new user database, persistence,
+search history, third-party transfer or audit record. The host's existing
+query/application logging, backups, access-control policy, and any deployment
+retention obligations still require operator verification. Query results must
+not be exposed to unauthorized frontends; results can contain personal data.

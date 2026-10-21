@@ -104,6 +104,36 @@ Moodle's `sesskey` at the existing generic AJAX dispatcher and the shared
 ClientStack display's BASE3 session CSRF token. The generic Moodle AJAX
 dispatcher remains the only transport.
 
+## Native user search
+
+`MoodleUsermanager::searchUsers(string $query, int $limit = 20, int $offset = 0): array`
+implements the shared BASE3 `IUsermanager` search contract. It searches the native
+Moodle `{user}` table for a literal, case-insensitive substring in username,
+first name, last name, either order of the full name, or email. All-digit queries
+also match the native Moodle user ID exactly. An empty search returns no results.
+
+The implementation uses Moodle's own `$DB->sql_like()`,
+`$DB->sql_like_escape()`, `$DB->sql_fullname()` and
+`$DB->get_records_sql()` APIs, with bound parameters and server-side
+`$offset`/`$limit` (1..100). Results are sorted by full name and native ID.
+Deleted accounts and the Moodle guest account are excluded; suspended or
+unconfirmed accounts are not silently excluded. Search result identities use
+the existing `User` mapping, but skip the per-user `is_siteadmin()` lookup and
+do not expand roles or BASE3 memberships. The existing `getUserById()` behavior
+remains unchanged.
+
+As with `getAllUsers()`, search requires `moodle/user:update` in the system
+context. This is a host-side directory-access boundary, not a BASE3
+authorization decision. The caller, such as the ClientStack audience-search
+endpoint, must separately enforce its own `IAuthorizationService` check and
+CSRF validation before exposing any search results. Neither the search text
+nor result data are persistently stored by this adapter.
+
+The test `test/Adapter/MoodleUsermanagerSearchTest.php` checks the interface
+contract and search/pagination input boundaries without executing code when
+loaded. Complete SQL, permissions and UI behavior require verification within
+a real Moodle site.
+
 ## Deployment
 
 `Base3MoodleLab` owns the project bootstrap members for `development`:

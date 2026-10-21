@@ -123,6 +123,66 @@ final class MoodleUsermanager implements IUsermanager {
 		return array_values(array_filter(array_map([$this, 'userObject'], $records)));
 	}
 
+	/**
+	 * Searches the native Moodle user directory without expanding roles or memberships.
+	 * Only callers with Moodle's system-level user-update capability see results.
+	 *
+	 * @param string $query Literal user ID, login, name or email search text
+	 * @param int $limit Maximum results per page (1..100)
+	 * @param int $offset Number of results to skip (0 or greater)
+	 * @return User[] Matching native user identities
+	 * @throws \InvalidArgumentException For invalid pagination values
+	 */
+	public function searchUsers(string $query, int $limit = 20, int $offset = 0): array {
+		if ($limit < 1 || $limit > 100 || $offset < 0) {
+			throw new \InvalidArgumentException('Invalid user search pagination.');
+		}
+		$query = trim($query);
+		if ($query === '') return [];
+		if (!has_capability('moodle/user:update', \context_system::instance())) return [];
+
+		global $DB;
+		$fullName = $DB->sql_fullname('u.firstname', 'u.lastname');
+		$reverseName = $DB->sql_fullname('u.lastname', 'u.firstname');
+		$like = '%' . $DB->sql_like_escape($query) . '%';
+		$params = ['guestusername' => 'guest'];
+		$conditions = [];
+		foreach ([
+			'u.username' => 'username',
+			'u.firstname' => 'firstname',
+			'u.lastname' => 'lastname',
+			$fullName => 'fullname',
+			$reverseName => 'reversename',
+			'u.email' => 'email'
+		] as $field => $param) {
+			$conditions[] = $DB->sql_like($field, ':' . $param, false);
+			$params[$param] = $like;
+		}
+		if (ctype_digit($query)) {
+			$id = filter_var(ltrim($query, '0') ?: '0', FILTER_VALIDATE_INT);
+			if ($id !== false) {
+				$conditions[] = 'u.id = :userid';
+				$params['userid'] = $id;
+			}
+		}
+
+		$sql = "SELECT u.id, u.username, u.firstname, u.lastname,
+		               u.firstnamephonetic, u.lastnamephonetic, u.middlename,
+		               u.alternatename, u.email, u.lang, u.deleted
+		          FROM {user} u
+		         WHERE u.deleted = 0
+		           AND u.username <> :guestusername
+		           AND (" . implode(' OR ', $conditions) . ")
+		      ORDER BY $fullName ASC, u.id ASC";
+		$records = $DB->get_records_sql($sql, $params, $offset, $limit);
+		$users = [];
+		foreach ($records as $record) {
+			$user = $this->userObject($record, false);
+			if ($user !== null) $users[] = $user;
+		}
+		return $users;
+	}
+
 	public function getAllGroups() {
 		return $this->groupConfiguration->getGroups();
 	}
@@ -179,7 +239,7 @@ final class MoodleUsermanager implements IUsermanager {
 		return (int) ($DB->get_field('role', 'id', ['shortname' => (string) $role->name]) ?: 0);
 	}
 
-	private function userObject(object $record): ?User {
+	private function userObject(object $record, bool $resolveAdminRole = true): ?User {
 		if (!isset($record->id) || !empty($record->deleted)) return null;
 		return User::fromArray([
 			'id' => (int) $record->id,
@@ -187,7 +247,7 @@ final class MoodleUsermanager implements IUsermanager {
 			'name' => fullname($record),
 			'email' => (string) ($record->email ?? ''),
 			'lang' => (string) ($record->lang ?? current_language()),
-			'role' => is_siteadmin((int) $record->id) ? 'admin' : 'member',
+			'role' => $resolveAdminRole && is_siteadmin((int) $record->id) ? 'admin' : 'member',
 			'roles' => []
 		]);
 	}
