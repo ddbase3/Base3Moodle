@@ -96,3 +96,45 @@ search history, third-party transfer or audit record. The host's existing
 query/application logging, backups, access-control policy, and any deployment
 retention obligations still require operator verification. Query results must
 not be exposed to unauthorized frontends; results can contain personal data.
+
+## Native identity and usermanager completion (22 October 2026)
+
+`MoodleUsermanager` now reads native system-context role assignments and
+capability definitions when returning a detailed `User` or effective metadata.
+Detailed identities may include the native role ID, shortname and label, plus
+an internal marker for native site administrators. Course/activity role
+membership remains resolved through the existing context-specific Moodle
+criterion. `getAllUsers()` and `searchUsers()` select only native user identity
+fields and do not resolve per-user roles, groups or administrator status.
+Their results can contain usernames, names, email addresses and language
+preferences, so callers must restrict directory access. No additional BASE3
+identity store, search log, receiver or external transfer is created here.
+
+Account registration through this adapter processes the requested username,
+first and last name, email address and initial password. When native permission
+and validation succeed, Moodle creates the account using its normal database,
+password hashing and account-created event. Password changes process the
+current actor's old and new plaintext credentials transiently through Moodle
+password verification, configured policy and reuse-history checks, and the
+native manual authentication plugin. On success Moodle's password history is
+updated, any configured other-session invalidation is performed, and password
+change preferences are cleared. The adapter does not persist raw credentials
+or maintain a separate account/credential table. Moodle authentication, audit
+logging and backups may retain associated metadata; their exact retention
+periods and recipients are not determined by this source snapshot.
+
+Authorized role-assignment changes modify native Moodle `role_assignments`
+records only in the system context, restricted to manually assigned roles.
+Site-wide capability grants/revocations modify Moodle's existing
+`role_capabilities` records only; they do not create a BASE3 ACL mirror.
+Moodle owns the related cache invalidation and native role-change events.
+The generic native-rights inspector remains read-only. User deletion,
+role-assignment erasure and related backup deletion continue to be governed
+by the Moodle host and its deployment policies, not by `IUsermanager`.
+
+The current patch adds no HTML or JavaScript UI; no new interactive
+accessibility behavior is claimed. Operators must verify consent/notification
+requirements where applicable, access to identity and capability metadata,
+account lifecycle, configured authentication services, audit logs, retention,
+backup erasure and privacy rights in the actual Moodle environment. Native
+Moodle integration tests are required in addition to isolated PHP tests.

@@ -104,6 +104,53 @@ Moodle's `sesskey` at the existing generic AJAX dispatcher and the shared
 ClientStack display's BASE3 session CSRF token. The generic Moodle AJAX
 dispatcher remains the only transport.
 
+## Native user and role metadata (22 October 2026)
+
+`MoodleUsermanager` now populates `User::roles` for the active identity and for
+`getUserById()`. The roles come from `get_user_roles()` in the Moodle system
+context; role `id` is the native role ID and `name` is its stable shortname.
+Site administrators additionally receive an internal, non-assignable
+`base3:admin` marker. Course and activity context roles remain accessible
+through the existing `MoodleRoleCriterion`, with explicit context identity.
+A BASE3 logical group is never substituted for a native Moodle role.
+
+`getPermissions()` enumerates the current user's granted native capabilities
+in the system context. `getAllPermissions()` exposes the native capability
+catalog only to Moodle site administrators. Both return descriptive BASE3
+`Permission` DTOs, not authorization decisions. `getAllRoles()` returns native
+role definitions with empty permission lists because effective capabilities
+vary by context and must not be invented from a global role definition.
+Actual access checks continue to use `IAuthorizationService` and Moodle's
+`has_capability()` in the owning resource context.
+
+Native membership changes use `role_assign()` and `role_unassign()`, with
+Moodle's system-context capability check and `get_assignable_roles()`.
+The adapter removes only manual assignments in the system context; roles
+owned by enrolment plugins and roles in courses are not changed. User IDs,
+role IDs and role names are validated against Moodle before write operations.
+`assignRoleToGroup()` and `revokeRoleFromGroup()` remain unsupported because
+native course groups do not imply a Moodle role-inheritance relationship.
+Site-wide capability changes, when invoked directly through `IUsermanager`,
+require native site administration and use Moodle's `assign_capability()` or
+`unassign_capability()` APIs. The shared BASE3 native-rights inspector stays
+read-only. It never becomes a parallel role editor.
+
+`registUser()` creates manually authenticated Moodle accounts only for actors
+with `moodle/user:create`, enforcing Moodle's username and password rules,
+required identity data and duplicate-account checks. Moodle owns credential
+hashing, persistence and account-created events. `changePassword()` is limited
+to the current manual-authentication account, checks the previous credential,
+Moodle's password policy, reuse history, impersonation and native own-password
+permission or a forced-change preference, and delegates the update to the
+native authentication plugin. Moodle's password history and configured session
+invalidation are updated. These methods do not add an HTTP endpoint; callers
+must authorize and protect any exposed action independently.
+
+`getAllUsers()` returns an identity-only directory listing, subject to
+`moodle/user:update` in the system context. Like `searchUsers()`, it omits
+expensive native role/admin expansion. Deleted and guest accounts are excluded.
+User searches and lists do not create another identity database or search log.
+
 ## Native user search
 
 `MoodleUsermanager::searchUsers(string $query, int $limit = 20, int $offset = 0): array`
@@ -119,8 +166,8 @@ The implementation uses Moodle's own `$DB->sql_like()`,
 Deleted accounts and the Moodle guest account are excluded; suspended or
 unconfirmed accounts are not silently excluded. Search result identities use
 the existing `User` mapping, but skip the per-user `is_siteadmin()` lookup and
-do not expand roles or BASE3 memberships. The existing `getUserById()` behavior
-remains unchanged.
+do not expand roles or BASE3 memberships. `getUserById()` now resolves native system roles for the addressed user,
+while preserving the original host-specific numeric identifier.
 
 As with `getAllUsers()`, search requires `moodle/user:update` in the system
 context. This is a host-side directory-access boundary, not a BASE3
@@ -129,10 +176,18 @@ endpoint, must separately enforce its own `IAuthorizationService` check and
 CSRF validation before exposing any search results. Neither the search text
 nor result data are persistently stored by this adapter.
 
-The test `test/Adapter/MoodleUsermanagerSearchTest.php` checks the interface
-contract and search/pagination input boundaries without executing code when
-loaded. Complete SQL, permissions and UI behavior require verification within
-a real Moodle site.
+The existing `test/Adapter/MoodleUsermanagerSearchTest.php` checks the shared
+search contract and pagination boundaries. The standalone
+`test/Adapter/MoodleUsermanagerSmokeTest.php` exercises identity DTOs, native
+role/capability operations, write authorization and password validation with
+Moodle function stubs. The latter can be run with:
+
+```sh
+php modules/Base3Moodle/test/Adapter/MoodleUsermanagerSmokeTest.php
+```
+
+Complete native role, database, authentication and capability behavior still
+requires verification within a live Moodle 5.3 installation.
 
 ## Deployment
 
@@ -159,6 +214,7 @@ permissions, logging, backups, and privacy notices.
 From the BASE3 project source root:
 
 ```sh
+php modules/Base3Moodle/test/Adapter/MoodleUsermanagerSmokeTest.php
 php modules/Base3Moodle/test/Authorization/MoodleAuthorizationSmokeTest.php
 php modules/Base3Moodle/test/Adapter/Base3MoodleFileManagerOutputSmokeTest.php
 php modules/Base3MoodleLab/test/GlobalChatbotLauncherSmokeTest.php

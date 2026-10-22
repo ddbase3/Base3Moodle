@@ -3,135 +3,190 @@
 namespace Base3Moodle\Adapter;
 
 use Base3\Usermanager\Api\IUsermanager;
-use Base3\Usermanager\Group;
 use Base3\Usermanager\Permission;
 use Base3\Usermanager\Role;
 use Base3\Usermanager\User;
 use Base3\Usermanager\UserCriterionEvaluator;
 use Base3Moodle\Service\MoodleGroupConfiguration;
 
-/** Adapts Moodle identities, native roles and permissions to the single BASE3 authorization model. */
+/** Exposes native Moodle identity and system-context role metadata to BASE3. */
 final class MoodleUsermanager implements IUsermanager {
-
-	private ?array $groups = null;
-	private ?array $roles = null;
 
 	public function __construct(
 		private readonly MoodleGroupConfiguration $groupConfiguration,
 		private readonly UserCriterionEvaluator $evaluator
 	) {}
 
-	public function getUser() {
+	/** Resolves the authenticated Moodle user with native system roles. */
+	public function getUser(): ?User {
 		global $USER;
-		return isloggedin() && !isguestuser() ? $this->userObject($USER) : null;
+		return isloggedin() && !isguestuser() ? $this->userObject($USER, true, $this->getRoles()) : null;
 	}
 
+	/** Looks up one native numeric user ID, excluding guests and deleted accounts. */
 	public function getUserById(int|string $id): ?User {
+		$userId = $this->normalizeUserId($id);
+		if ($userId === null) return null;
+
 		global $DB;
-		$record = $DB->get_record('user', ['id' => (int) $id, 'deleted' => 0]);
-		return $record ? $this->userObject($record) : null;
+		$record = $DB->get_record('user', ['id' => $userId, 'deleted' => 0]);
+		return $record && !isguestuser($record) ? $this->userObject($record) : null;
 	}
 
-	public function getGroups() {
-		if ($this->groups !== null) return $this->groups;
+	/** Evaluates BASE3 group criteria without modifying native Moodle role assignments. */
+	public function getGroups(): array {
 		$user = $this->getUser();
-		$groups = [];
 		$entries = $this->groupConfiguration->getEntries();
+		$groups = [];
+		$explicitMatch = false;
+
 		foreach ($entries as $entry) {
-			if ($this->evaluator->matches($user, $entry['criteria'])) $groups[$entry['group']->name] = $entry['group'];
+			try {
+				$matched = $this->evaluator->matches($user, $entry['criteria']);
+			} catch (\InvalidArgumentException) {
+				// Invalid criteria cannot establish group membership.
+				$matched = false;
+			}
+			if (!$matched) continue;
+			$groups[] = $entry['group'];
+			if ($entry['editable']) $explicitMatch = true;
 		}
-		// The generic authenticated group does not count as an explicit audience assignment.
-		// A fallback never grants development or administration membership.
-		$matched = array_diff(array_keys($groups), ['authenticated', 'anonymous']);
-		if ($user !== null && $matched === []) {
+
+		if ($user !== null && !$explicitMatch) {
 			$default = $this->groupConfiguration->getDefaultGroup();
 			foreach ($entries as $entry) {
-				if ($default !== '' && $entry['group']->name === $default) $groups[$default] = $entry['group'];
+				if (!$entry['editable'] || (string)$entry['group']->name !== $default) continue;
+				$groups[] = $entry['group'];
+				break;
 			}
 		}
-		return $this->groups = array_values($groups);
+
+		return $groups;
 	}
 
-	public function getRoles() {
-		if ($this->roles !== null) return $this->roles;
+	/** Returns current native role assignments in the Moodle system context only. */
+	public function getRoles(): array {
 		global $USER;
-		if (!isloggedin() || isguestuser()) return $this->roles = [];
-		// BASE3 global role selectors use system context. Course roles can be selected
-		// explicitly with MoodleRoleCriterion::context_id and native parent resolution.
-		$assignments = get_user_roles(\context_system::instance(), (int)$USER->id, true);
-		$result = [];
-		foreach ($assignments as $assignment) {
-			$role = $this->roleObject((array)$assignment);
-			$result[(string)$role->id] = $role;
-		}
-		if (is_siteadmin()) $result['admin'] = Role::fromArray([
-			'id' => 'admin', 'name' => 'admin', 'label' => 'Administrator', 'permissions' => []
-		]);
-		return $this->roles = array_values($result);
-	}
-
-	public function getPermissions() {
 		if (!isloggedin() || isguestuser()) return [];
-		$caps = [];
-		foreach (['moodle/site:config', 'moodle/course:view', 'moodle/user:update', 'moodle/role:assign'] as $cap) {
-			if (has_capability($cap, \context_system::instance())) $caps[] = Permission::for('moodle', $cap);
-		}
-		if (is_siteadmin()) $caps[] = Permission::for('system', 'admin');
-		return $caps;
+		return $this->rolesForUser((int)$USER->id, is_siteadmin());
 	}
 
+	/** Lists effective system-context Moodle capabilities as descriptive metadata. */
+	public function getPermissions(): array {
+		if (!isloggedin() || isguestuser()) return [];
+		$context = \context_system::instance();
+		$permissions = [];
+		$names = array_keys(get_all_capabilities());
+		sort($names);
+		foreach ($names as $name) {
+			if (has_capability($name, $context)) $permissions[] = Permission::for('moodle', $name);
+		}
+		if (is_siteadmin()) $permissions[] = Permission::for('system', 'admin');
+		return $permissions;
+	}
+
+	/** Matches a native role ID or stable shortname; no BASE3 group implies a role. */
 	public function hasRole(Role $role): bool {
-		$name = (string) ($role->name ?? '');
-		if (in_array($name, ['admin', 'administration'], true)) return is_siteadmin();
-		foreach ($this->getRoles() as $candidate) {
-			if ((string) $candidate->name === $name) return true;
+		if (!isloggedin() || isguestuser()) return false;
+		$id = trim((string)($role->id ?? ''));
+		$name = trim((string)($role->name ?? ''));
+		if ($id === '' && $name === '') return false;
+		if ($id === '' && $name === 'admin') return is_siteadmin();
+
+		foreach ($this->getRoles() as $assigned) {
+			if ($id !== '' && $id !== (string)$assigned->id) continue;
+			if ($name !== '' && $name !== (string)$assigned->name) continue;
+			return true;
 		}
 		return false;
 	}
 
-	public function registUser($userid, $password, $data = null) {
-		if (!has_capability('moodle/user:create', \context_system::instance())) return false;
-		if (!is_string($userid) || trim($userid) === '') return false;
+	/** Creates a native manual-authentication account with Moodle validation and events. */
+	public function registUser($userid, $password, $data = null): bool {
+		if (!isloggedin() || isguestuser() || !has_capability('moodle/user:create', \context_system::instance())) return false;
+		if (!is_string($userid) || !is_string($password)) return false;
+		$login = trim($userid);
+		if ($login === '' || $login !== $userid || clean_param($login, PARAM_USERNAME) !== $login || $password === '') return false;
 		$props = is_array($data) ? $data : [];
-		if (!isset($props['email']) || !filter_var($props['email'], FILTER_VALIDATE_EMAIL)) return false;
-		$user = (object) [
-			'username' => $userid,
-			'password' => (string) $password,
-			'email' => (string) $props['email'],
-			'firstname' => (string) ($props['firstname'] ?? $userid),
-			'lastname' => (string) ($props['lastname'] ?? $userid),
+		$email = (string)($props['email'] ?? '');
+		if (!filter_var($email, FILTER_VALIDATE_EMAIL)) return false;
+
+		global $CFG, $DB;
+		if ($DB->record_exists('user', ['username' => $login, 'mnethostid' => (int)$CFG->mnet_localhost_id, 'deleted' => 0])) return false;
+		$user = (object)[
+			'username' => $login,
+			'password' => $password,
+			'email' => $email,
+			'firstname' => (string)($props['firstname'] ?? $login),
+			'lastname' => (string)($props['lastname'] ?? $login),
 			'auth' => 'manual',
 			'confirmed' => 1,
-			'mnethostid' => (int) $GLOBALS['CFG']->mnet_localhost_id
+			'mnethostid' => (int)$CFG->mnet_localhost_id
 		];
-		require_once($GLOBALS['CFG']->dirroot . '/user/lib.php');
-		return (int) user_create_user($user, true, false) > 0;
+		$message = null;
+		if (!check_password_policy($password, $message, $user)) return false;
+		return (int)\core\user::create_user($user, true, true) > 0;
 	}
 
-	public function changePassword($oldpassword, $newpassword) {
-		global $USER;
-		if (!isloggedin() || isguestuser() || $USER->auth !== 'manual') return false;
-		if (!validate_internal_user_password($USER, (string) $oldpassword)) return false;
-		update_internal_user_password($USER, (string) $newpassword);
+	/** Verifies the old credential and delegates policy, history and update to Moodle. */
+	public function changePassword($oldpassword, $newpassword): bool {
+		global $CFG, $USER;
+		if (!isloggedin() || isguestuser() || ($USER->auth ?? '') !== 'manual'
+			|| \core\session\manager::is_loggedinas() || is_mnet_remote_user($USER)) return false;
+		if (!has_capability('moodle/user:changeownpassword', \context_system::instance())
+			&& !get_user_preferences('auth_forcepasswordchange', false)) return false;
+		if (!is_string($oldpassword) || !is_string($newpassword) || $newpassword === '' || $newpassword === $oldpassword) return false;
+		if (!validate_internal_user_password($USER, $oldpassword)) return false;
+		if (\core\user::is_previously_used_password((int)$USER->id, $newpassword)) return false;
+		$message = null;
+		if (!check_password_policy($newpassword, $message, $USER)) return false;
+		$auth = get_auth_plugin($USER->auth);
+		if (!$auth->can_change_password() || !$auth->user_update_password($USER, $newpassword)) return false;
+
+		\core\user::add_password_history((int)$USER->id, $newpassword);
+		if (!empty($CFG->passwordchangelogout)) {
+			\core\session\manager::destroy_user_sessions((int)$USER->id, session_id());
+		}
+		login_unlock_account($USER);
+		unset_user_preference('auth_forcepasswordchange', $USER);
+		unset_user_preference('create_password', $USER);
 		return true;
 	}
 
-	public function getAllUsers() {
-		global $DB;
+	/** Enumerates visible native identity fields without per-user RBAC lookups. */
+	public function getAllUsers(): array {
 		if (!has_capability('moodle/user:update', \context_system::instance())) return [];
-		$records = $DB->get_records('user', ['deleted' => 0]);
-		return array_values(array_filter(array_map([$this, 'userObject'], $records)));
+
+		global $DB;
+		$fullName = $DB->sql_fullname('u.firstname', 'u.lastname');
+		$sql = "SELECT u.id, u.username, u.firstname, u.lastname,
+		               u.firstnamephonetic, u.lastnamephonetic, u.middlename,
+		               u.alternatename, u.email, u.lang, u.deleted
+		          FROM {user} u
+		         WHERE u.deleted = 0 AND u.username <> :guestusername
+		      ORDER BY $fullName ASC, u.id ASC";
+		$records = $DB->get_records_sql($sql, ['guestusername' => 'guest']);
+		$users = [];
+		foreach ($records as $record) {
+			$user = $this->userObject($record, false);
+			if ($user !== null) $users[] = $user;
+		}
+		return $users;
 	}
 
 	/**
-	 * Searches the native Moodle user directory without expanding roles or memberships.
-	 * Only callers with Moodle's system-level user-update capability see results.
+	 * Searches the native user directory through one bounded Moodle database query.
 	 *
-	 * @param string $query Literal user ID, login, name or email search text
-	 * @param int $limit Maximum results per page (1..100)
-	 * @param int $offset Number of results to skip (0 or greater)
-	 * @return User[] Matching native user identities
-	 * @throws \InvalidArgumentException For invalid pagination values
+	 * Queries are literal, include exact numeric IDs and both full-name orders,
+	 * and exclude deleted or guest accounts. Directory results contain identity
+	 * fields only; callers must also authorize their external API or UI endpoint.
+	 *
+	 * @param string $query Literal login, name, email or native user ID search text
+	 * @param int $limit Page size from 1 through 100
+	 * @param int $offset Non-negative result offset
+	 * @return User[] Native Moodle identities ordered by full name and ID
+	 * @throws \InvalidArgumentException For invalid pagination
+	 * @throws \Throwable For a native Moodle database failure
 	 */
 	public function searchUsers(string $query, int $limit = 20, int $offset = 0): array {
 		if ($limit < 1 || $limit > 100 || $offset < 0) {
@@ -159,7 +214,7 @@ final class MoodleUsermanager implements IUsermanager {
 			$params[$param] = $like;
 		}
 		if (ctype_digit($query)) {
-			$id = filter_var(ltrim($query, '0') ?: '0', FILTER_VALIDATE_INT);
+			$id = filter_var(ltrim($query, '0') ?: '0', FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
 			if ($id !== false) {
 				$conditions[] = 'u.id = :userid';
 				$params['userid'] = $id;
@@ -183,77 +238,166 @@ final class MoodleUsermanager implements IUsermanager {
 		return $users;
 	}
 
-	public function getAllGroups() {
+	/** Lists canonical BASE3 group definitions rather than native Moodle course groups. */
+	public function getAllGroups(): array {
 		return $this->groupConfiguration->getGroups();
 	}
 
-	public function getAllRoles() {
+	/** Lists native Moodle role definitions independently of current membership. */
+	public function getAllRoles(): array {
 		global $DB;
-		return array_values(array_map(fn($role) => $this->roleObject((array) $role), $DB->get_records('role')));
+		return array_values(array_map(
+			fn($role): Role => $this->roleObject((array)$role),
+			$DB->get_records('role', [], 'sortorder ASC, id ASC')
+		));
 	}
 
-	public function getAllPermissions() {
-		global $DB;
+	/** Returns the native capability catalog, never an effective permission decision. */
+	public function getAllPermissions(): array {
 		if (!is_siteadmin()) return [];
-		return array_map(static fn($row) => Permission::for('moodle', (string) $row->name), array_values($DB->get_records('capabilities')));
+		$names = array_keys(get_all_capabilities());
+		sort($names);
+		$permissions = array_map(static fn(string $name): Permission => Permission::for('moodle', $name), $names);
+		$permissions[] = Permission::for('system', 'admin');
+		return $permissions;
 	}
 
+	/** Adds a manually assigned system role only when Moodle marks it assignable. */
 	public function assignRoleToUser($userid, Role $role): bool {
-		if (!has_capability('moodle/role:assign', \context_system::instance())) return false;
-		$id = $this->getRoleId($role);
-		if ($id === 0) return false;
-		role_assign($id, (int) $userid, \context_system::instance()->id);
-		return true;
+		$context = \context_system::instance();
+		if (!isloggedin() || isguestuser() || !has_capability('moodle/role:assign', $context)) return false;
+		$userId = $this->normalizeUserId($userid);
+		$roleId = $this->nativeRoleId($role);
+		if ($userId === null || $roleId === null || !array_key_exists($roleId, get_assignable_roles($context))) return false;
+		if (!$this->nativeUserExists($userId)) return false;
+		return (int)role_assign($roleId, $userId, $context->id) > 0;
 	}
 
+	/** Removes only a manually assigned system role, never plugin-owned enrolment roles. */
 	public function revokeRoleFromUser($userid, Role $role): bool {
-		if (!has_capability('moodle/role:assign', \context_system::instance())) return false;
-		$id = $this->getRoleId($role);
-		if ($id === 0) return false;
-		role_unassign($id, (int) $userid, \context_system::instance()->id);
-		return true;
+		$context = \context_system::instance();
+		if (!isloggedin() || isguestuser() || !has_capability('moodle/role:assign', $context)) return false;
+		$userId = $this->normalizeUserId($userid);
+		$roleId = $this->nativeRoleId($role);
+		global $USER, $DB;
+		if ($userId === null || $roleId === null || $userId === (int)$USER->id
+			|| !array_key_exists($roleId, get_assignable_roles($context)) || !$this->nativeUserExists($userId)) return false;
+		$match = ['roleid' => $roleId, 'userid' => $userId, 'contextid' => $context->id, 'component' => '', 'itemid' => 0];
+		if (!$DB->record_exists('role_assignments', $match)) return false;
+		role_unassign($roleId, $userId, $context->id);
+		return !$DB->record_exists('role_assignments', $match);
 	}
 
-	// Moodle course groups are not equivalent to BASE3 global role assignment.
+	/** Moodle course groups do not confer native role assignments. */
 	public function assignRoleToGroup($groupid, Role $role): bool { return false; }
+
+	/** Moodle course groups do not confer native role assignments. */
 	public function revokeRoleFromGroup($groupid, Role $role): bool { return false; }
 
+	/** Writes only global Moodle CAP_ALLOW defaults through the native roles API. */
 	public function addPermissionToRole(Role $role, Permission $permission): bool {
 		if (!is_siteadmin() || $permission->scope !== 'moodle') return false;
-		$id = $this->getRoleId($role);
-		if ($id === 0 || get_capability_info((string) $permission->permission) === false) return false;
-		assign_capability((string) $permission->permission, CAP_ALLOW, $id, \context_system::instance()->id, true);
-		return true;
+		$roleId = $this->nativeRoleId($role);
+		$capability = (string)($permission->permission ?? '');
+		if ($roleId === null || $capability === '' || get_capability_info($capability) === null) return false;
+		return assign_capability($capability, CAP_ALLOW, $roleId, \context_system::instance()->id, true);
 	}
 
+	/** Removes only an existing system-context capability override. */
 	public function removePermissionFromRole(Role $role, Permission $permission): bool {
 		if (!is_siteadmin() || $permission->scope !== 'moodle') return false;
-		$id = $this->getRoleId($role);
-		if ($id === 0) return false;
-		unassign_capability((string) $permission->permission, $id, \context_system::instance()->id);
-		return true;
-	}
-
-	private function getRoleId(Role $role): int {
+		$roleId = $this->nativeRoleId($role);
+		$capability = (string)($permission->permission ?? '');
+		if ($roleId === null || $capability === '' || get_capability_info($capability) === null) return false;
+		$context = \context_system::instance();
 		global $DB;
-		return (int) ($DB->get_field('role', 'id', ['shortname' => (string) $role->name]) ?: 0);
+		$match = ['roleid' => $roleId, 'contextid' => $context->id, 'capability' => $capability];
+		if (!$DB->record_exists('role_capabilities', $match)) return false;
+		unassign_capability($capability, $roleId, $context->id);
+		return !$DB->record_exists('role_capabilities', $match);
 	}
 
-	private function userObject(object $record, bool $resolveAdminRole = true): ?User {
-		if (!isset($record->id) || !empty($record->deleted)) return null;
+	/** Projects one detailed identity or a lightweight native directory record. */
+	private function userObject(object $record, bool $detailed = true, ?array $roles = null): ?User {
+		$id = (int)($record->id ?? 0);
+		if ($id <= 0 || !empty($record->deleted) || (string)($record->username ?? '') === 'guest') return null;
+		$administrator = $detailed && is_siteadmin($id);
+		$resolvedRoles = $detailed ? ($roles ?? $this->rolesForUser($id, $administrator)) : [];
+		$login = (string)($record->username ?? '');
+		$name = trim(fullname($record));
 		return User::fromArray([
-			'id' => (int) $record->id,
-			'userid' => (string) ($record->username ?? $record->id),
-			'name' => fullname($record),
-			'email' => (string) ($record->email ?? ''),
-			'lang' => (string) ($record->lang ?? current_language()),
-			'role' => $resolveAdminRole && is_siteadmin((int) $record->id) ? 'admin' : 'member',
-			'roles' => []
+			'id' => $id,
+			'userid' => $login,
+			'name' => $name !== '' ? $name : $login,
+			'email' => (string)($record->email ?? ''),
+			'lang' => (string)($record->lang ?? current_language()),
+			'role' => $detailed ? ($administrator ? 'admin' : 'member') : '',
+			'roles' => $resolvedRoles
 		]);
 	}
 
+	/** Resolves native system assignments and the non-assignable site administrator marker. */
+	private function rolesForUser(int $userId, bool $administrator): array {
+		$roles = [];
+		foreach (get_user_roles(\context_system::instance(), $userId, true) as $assignment) {
+			$roleId = (int)($assignment->roleid ?? 0);
+			if ($roleId <= 0) continue;
+			$roles[$roleId] = $this->roleObject((array)$assignment);
+		}
+		if ($administrator) {
+			$roles['base3:admin'] = Role::fromArray([
+				'id' => 'base3:admin',
+				'name' => 'admin',
+				'label' => 'Administrator',
+				'permissions' => [Permission::for('system', 'admin')]
+			]);
+		}
+		return array_values($roles);
+	}
+
+	/** Represents stable native role identifiers, not effective resource permissions. */
 	private function roleObject(array $role): Role {
-		$name = (string) ($role['shortname'] ?? $role['name'] ?? '');
-		return Role::fromArray(['id' => $role['roleid'] ?? $role['id'] ?? $name, 'name' => $name, 'label' => (string) ($role['name'] ?? $name), 'permissions' => []]);
+		$id = (int)($role['roleid'] ?? $role['id'] ?? 0);
+		$name = (string)($role['shortname'] ?? '');
+		return Role::fromArray([
+			'id' => $id,
+			'name' => $name,
+			'label' => (string)($role['name'] ?? $name),
+			'permissions' => []
+		]);
+	}
+
+	/** Resolves only a real native role, rejecting synthetic admin and contradictory IDs. */
+	private function nativeRoleId(Role $role): ?int {
+		$id = trim((string)($role->id ?? ''));
+		$name = trim((string)($role->name ?? ''));
+		if ($id === 'base3:admin' || ($id === '' && ($name === '' || $name === 'admin'))) return null;
+		global $DB;
+		if ($id !== '') {
+			$roleId = $this->normalizeUserId($id);
+			if ($roleId === null) return null;
+			$record = $DB->get_record('role', ['id' => $roleId], 'id,shortname');
+		} else {
+			$record = $DB->get_record('role', ['shortname' => $name], 'id,shortname');
+		}
+		if (!$record || ($name !== '' && $name !== (string)$record->shortname)) return null;
+		return (int)$record->id > 0 ? (int)$record->id : null;
+	}
+
+	/** Rejects absent, deleted or guest user accounts before assigning native roles. */
+	private function nativeUserExists(int $userId): bool {
+		global $DB;
+		$record = $DB->get_record('user', ['id' => $userId, 'deleted' => 0], 'id,username');
+		return $record !== false && $record !== null && (string)$record->username !== 'guest';
+	}
+
+	/** Normalizes positive Moodle IDs without accepting partial or overflowing numbers. */
+	private function normalizeUserId(int|string $id): ?int {
+		if (is_int($id)) return $id > 0 ? $id : null;
+		if ($id === '' || !ctype_digit($id)) return null;
+		$normalized = ltrim($id, '0');
+		if ($normalized === '') return null;
+		$value = filter_var($normalized, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+		return $value === false ? null : $value;
 	}
 }
