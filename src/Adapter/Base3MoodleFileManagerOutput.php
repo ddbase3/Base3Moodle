@@ -8,7 +8,6 @@ use Base3\Authorization\Dto\AuthorizationRequest;
 use Base3\Api\IRequest;
 use Base3\Usermanager\Api\IUsermanager;
 use Base3\Usermanager\Permission;
-use Base3Moodle\Api\IBase3MoodleSettings;
 use RuntimeException;
 
 /** Routes existing Moodle FileManager HTTP operations through the generic BASE3 output. */
@@ -20,7 +19,7 @@ final class Base3MoodleFileManagerOutput implements IOutput {
 		private readonly IRequest $request,
 		private readonly IUsermanager $usermanager,
 		private readonly IAuthorizationService $authorization,
-		private readonly IBase3MoodleSettings $settings,
+		private readonly array $chatbotConfigDisplayData,
 		private readonly MoodleFileManagerHttpService $fileManagerHttpService
 	) {}
 
@@ -51,15 +50,7 @@ final class Base3MoodleFileManagerOutput implements IOutput {
 
 	/** @return array{0:string,1:string} */
 	private function configuredOwner(): array {
-		$config = null;
-		foreach ($this->settings->getAdministrationConfig() as $tab) {
-			foreach ($tab['displays'] ?? [] as $entry) {
-				if (($entry['name'] ?? '') !== 'chatbotconfigdisplay') continue;
-				if ($config !== null) throw new RuntimeException('Duplicate chatbot administration configuration.');
-				$config = $entry['data'] ?? null;
-			}
-		}
-
+		$config = $this->chatbotConfigDisplayData;
 		$group = is_array($config) ? trim((string) ($config['group'] ?? '')) : '';
 		$name = is_array($config) ? trim((string) ($config['name'] ?? '')) : '';
 		if ($group === '' || $name === '') {

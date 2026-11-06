@@ -107,14 +107,8 @@ final class MoodleFileManagerHttpService {
 		$storage = $this->storage->openOrCreate($group, $name, $mode);
 		$stat = $storage->stat($path);
 		if ($stat === null || ($stat['type'] ?? '') !== 'file') throw new InvalidArgumentException('File not found.');
-		$content = $storage->read($path);
-		$name = basename($path);
-		$fallback = preg_replace('/[^A-Za-z0-9._-]/', '_', $name) ?: 'download';
-		header('Content-Type: application/octet-stream');
-		header('Content-Length: ' . strlen($content));
-		header('Content-Disposition: attachment; filename="' . $fallback . '"; filename*=UTF-8\'\'' . rawurlencode($name));
-		header('X-Content-Type-Options: nosniff');
-		echo $content;
+		if (!$storage instanceof MoodleFileStorage) throw new RuntimeException('Moodle File API storage is not configured.');
+		$storage->sendFile($path);
 	}
 
 	private function jsonBody(): array {

@@ -114,18 +114,13 @@ final class MoodleFileUploadService {
 			throw new RuntimeException('Upload chunk temporary file is missing.');
 		}
 
-		$content = file_get_contents($tmpName);
-		if (!is_string($content)) {
-			throw new RuntimeException('Upload chunk could not be read.');
-		}
-
 		$expectedSize = $this->expectedChunkSize($meta, $index);
-		if (strlen($content) !== $expectedSize) {
+		if (filesize($tmpName) !== $expectedSize) {
 			throw new InvalidArgumentException('Upload chunk size does not match the upload session.');
 		}
 
 		$chunkPath = $this->chunkPath($ownerGroup, $ownerName, $uploadId, $index);
-		if (file_put_contents($chunkPath, $content, LOCK_EX) === false) {
+		if (!copy($tmpName, $chunkPath)) {
 			throw new RuntimeException('Upload chunk could not be stored.');
 		}
 
@@ -147,40 +142,52 @@ final class MoodleFileUploadService {
 
 	public function finish(string $ownerGroup, string $ownerName, string $mode, int $userId, string $uploadId): array {
 		$meta = $this->loadMeta($ownerGroup, $ownerName, $mode, $userId, $uploadId);
-		$content = '';
+		$temporary = tempnam(DIR_TMP, 'base3-upload-');
+		if ($temporary === false) throw new RuntimeException('Cannot create upload assembly file.');
 
-		for ($index = 0; $index < (int)$meta['total_chunks']; $index++) {
-			$chunkPath = $this->chunkPath($ownerGroup, $ownerName, $uploadId, $index);
-			if (!is_file($chunkPath)) {
-				throw new RuntimeException('Upload is incomplete. Missing chunk ' . $index . '.');
+		try {
+			$stream = fopen($temporary, 'wb');
+			if ($stream === false) throw new RuntimeException('Cannot open upload assembly file.');
+			try {
+				$assembledSize = 0;
+				for ($index = 0; $index < (int)$meta['total_chunks']; $index++) {
+					$chunkPath = $this->chunkPath($ownerGroup, $ownerName, $uploadId, $index);
+					if (!is_file($chunkPath)) {
+						throw new RuntimeException('Upload is incomplete. Missing chunk ' . $index . '.');
+					}
+					$chunk = fopen($chunkPath, 'rb');
+					if ($chunk === false) throw new RuntimeException('Upload chunk could not be read during finalization.');
+					try {
+						$written = stream_copy_to_stream($chunk, $stream);
+					} finally {
+						fclose($chunk);
+					}
+					if ($written !== $this->expectedChunkSize($meta, $index)) {
+						throw new RuntimeException('Upload chunk size changed during finalization.');
+					}
+					$assembledSize += $written;
+				}
+				if ($assembledSize !== (int)$meta['size']) {
+					throw new RuntimeException('Finalized upload size does not match the announced file size.');
+				}
+				if (!fflush($stream)) throw new RuntimeException('Cannot flush assembled upload.');
+			} finally {
+				fclose($stream);
 			}
 
-			$chunk = file_get_contents($chunkPath);
-			if (!is_string($chunk)) {
-				throw new RuntimeException('Upload chunk could not be read during finalization.');
+			$targetPath = MoodleFileManagerHttpService::joinPath(
+				(string)$meta['path'], (string)$meta['name']
+			);
+			$storage = $this->storageService->openOrCreate($ownerGroup, $ownerName, $mode);
+			if (!$storage instanceof MoodleFileStorage || !$storage->writeFromPathname($targetPath, $temporary)) {
+				throw new RuntimeException('Moodle File API rejected the finalized upload.');
 			}
-			$content .= $chunk;
-		}
-
-		if (strlen($content) !== (int)$meta['size']) {
-			throw new RuntimeException('Finalized upload size does not match the announced file size.');
-		}
-
-		$targetPath = MoodleFileManagerHttpService::joinPath(
-			(string)$meta['path'],
-			(string)$meta['name']
-		);
-		$storage = $this->storageService->openOrCreate($ownerGroup, $ownerName, $mode);
-
-		if (!$storage->write($targetPath, $content)) {
-			throw new RuntimeException('File storage rejected the finalized upload.');
+		} finally {
+			unlink($temporary);
 		}
 
 		$descriptor = MoodleFileManagerHttpService::descriptor($targetPath, $storage->stat($targetPath));
-		if ($descriptor === null) {
-			throw new RuntimeException('Uploaded file could not be resolved after finalization.');
-		}
-
+		if ($descriptor === null) throw new RuntimeException('Uploaded file could not be resolved after finalization.');
 		$this->removeSession($ownerGroup, $ownerName, $uploadId);
 		return $descriptor;
 	}

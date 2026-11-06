@@ -3,26 +3,31 @@
 Source reviewed: `src/Adapter/MoodleFileManagerHttpService.php`,
 `MoodleFileUploadService.php`, `MoodleManagedFileStorageService.php`,
 `MoodleFileStorage.php`, `MoodleUsermanager.php`, and
-`Base3MoodleFileManagerOutput.php` (17 October 2026).
+`Base3MoodleFileManagerOutput.php` (6 November 2026).
 
 The FileManager output handles the active Moodle user ID and the admin
 capability check (`moodle/site:config`) via BASE3 `IUsermanager`, plus the
 existing Moodle session key. The configured owner group/name and requested
-file operation are supplied to the unchanged HTTP service. JSON requests,
+file operation are supplied to the existing HTTP service. JSON requests,
 file names, paths, file bytes and upload metadata are processed to manage
 resources for that configured owner.
 
-The managed storage backend persists content beneath `DIR_LOCAL/storage/`,
-using a SHA-256 owner identifier. `DIR_LOCAL` is set to the Moodle data root's
-`base3/` directory by the native integration. Chunk upload sessions store
+The managed storage backend persists final files only through Moodle's
+native File API in system context, component `local_base3`, private file area
+`base3storage`, item ID 0, with per-owner SHA-256 paths. No second file catalog
+or `DIR_LOCAL/storage/` is used. `DIR_LOCAL` points to the Moodle dataroot
+`base3/` directory. Chunk upload sessions store
 metadata (including user ID and creation time) and parts beneath
 `DIR_LOCAL/filemanager-upload/`. Completed and aborted sessions are deleted;
 there is no verified automatic expiry for abandoned sessions.
 
-Only the routing has changed. It does not introduce additional recipients,
-external transfers, or new persistent data stores. The storage API already
-supports file deletion and removal of owners; deleting physical backups is
-outside its scope. Deployment-specific controls, log/backup retention,
+The routing and the 13-action protocol remain unchanged, but completed-file
+storage has moved from private local files to Moodle's native stored-file
+records. Assembled upload files are transient under `DIR_TMP`, copied with
+`create_file_from_pathname`, and removed after completion or failure. This
+change adds no external recipient or network transfer. The existing storage
+API supports individual deletion and removal of owners, not Moodle backup
+or independently stored data erasure. Deployment-specific controls, log/backup retention,
 processor information, and any other plugins' data flow remain to be
 assessed by the operator. The existing ClientStack FileManager UI requires
 live keyboard and assistive-technology verification for WCAG 2.2 AA.

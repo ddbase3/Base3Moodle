@@ -2,10 +2,15 @@
 
 /** Run without Moodle: php modules/Base3Moodle/test/Authorization/MoodleAuthorizationSmokeTest.php */
 
+use Base3Moodle\Test\Support\TestMap;
+use Base3Moodle\Test\Support\TestSettingsStore;
+use Base3Moodle\Test\Support\SmokeMoodleDatabase;
+use Base3Moodle\Test\Support\SmokeTemplateRenderer;
+
 $modules = dirname(__DIR__, 3);
 spl_autoload_register(static function(string $class) use ($modules): void {
 	foreach (['Base3\\' => 'Base3Framework', 'Base3Moodle\\' => 'Base3Moodle',
-		'Base3MoodleLab\\' => 'Base3MoodleLab', 'PulseCore\\' => 'PulseCore',
+		'Base3MoodleLab\\' => 'Base3MoodleLab', 'Chatbot\\' => 'Chatbot',
 		'UiFoundation\\' => 'UiFoundation', 'ClientStack\\' => 'ClientStack'] as $prefix => $module) {
 		if (!str_starts_with($class, $prefix)) continue;
 		$file = $modules . '/' . $module . '/src/' . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
@@ -14,10 +19,15 @@ spl_autoload_register(static function(string $class) use ($modules): void {
 	}
 });
 
+foreach (['context', 'context_system', 'TestMap', 'TestSettingsStore', 'SmokeMoodleDatabase', 'SmokeTemplateRenderer'] as $fixture) {
+	require_once __DIR__ . '/../Support/' . $fixture . '.php';
+}
+
+
 const SITEID = 1;
 const IGNORE_MISSING = false;
-class context { public function __construct(public int $id) {} public static function instance_by_id(int $id, $strict = false) { return in_array($id, [1, 77], true) ? new self($id) : false; } }
-class context_system extends context { public static function instance(): self { return new self(1); } }
+
+
 function isloggedin(): bool { return $GLOBALS['loggedin']; }
 function isguestuser(): bool { return !$GLOBALS['loggedin']; }
 function is_siteadmin(int $id = 0): bool { return $GLOBALS['siteAdmin'] && ($id === 0 || $id === 42); }
@@ -32,37 +42,8 @@ function groups_get_user_groups(int $courseId, int $userId): array { return [[]]
 function groups_get_group(int $groupId, string $fields = '*') { return $groupId === 20 ? (object)['id' => 20, 'courseid' => 5] : false; }
 function groups_is_member(int $groupId, int $userId): bool { return $groupId === 20 && $userId === 42; }
 
-class TestMap implements \Base3\Api\IClassMap {
-	public array $registry = [];
-	public array $names = [];
-	public function instantiate(string $class) { return null; }
-	public function instantiateWith(string $class, array $arguments = []) { return null; }
-	public function generate($regenerate = false): void {}
-	public function getApps() { return []; }
-	public function &getInstances(array $criteria = []) { $a=[]; return $a; }
-	public function &getInstancesByInterface($interface) { $a = $this->registry[$interface] ?? []; return $a; }
-	public function &getInstancesByAppInterface($app, $interface, $retry = false) { $a=[]; return $a; }
-	public function &getInstanceByAppName($app, $name, $retry = false) { $a=null;return $a; }
-	public function getClassByInterfaceName(string $interface, string $name): ?string { return null; }
-	public function &getInstanceByInterfaceName($interface, $name, $retry = false) {
-		if (isset($this->names[$name])) return $this->names[$name];
-		$none = null;
-		return $none;
-	}
-	public function &getInstanceByAppInterfaceName($app, $interface, $name, $retry = false) { $a=null;return $a; }
-	public function getPlugins() { return []; }
-}
-class TestSettingsStore implements \Base3\Settings\Api\ISettingsStore {
-	public array $data = [];
-	public int $saves = 0;
-	public function get(string $group, string $name, array $default = []): array { return $this->data[$group][$name] ?? $default; }
-	public function set(string $group, string $name, array $settings): void { $this->data[$group][$name] = $settings; }
-	public function has(string $group, string $name): bool { return isset($this->data[$group][$name]); }
-	public function remove(string $group, string $name): void { unset($this->data[$group][$name]); }
-	public function getGroup(string $group): array { return $this->data[$group] ?? []; }
-	public function save(): void { $this->saves++; }
-	public function reload(): void {}
-}
+
+
 function check(bool $condition, string $message): void {
 	if (!$condition) throw new RuntimeException('FAIL: ' . $message);
 	echo 'PASS: ', $message, PHP_EOL;
@@ -86,18 +67,21 @@ foreach ([
 ] as $criterion) $map->names[$criterion::getName()] = $criterion;
 $map->registry[\Base3\Usermanager\Api\IUserCriterion::class] = array_values($map->names);
 $map->registry[\Base3\Usermanager\Api\IGroup::class] = [
-	new \Base3Moodle\Group\MoodleAnonymousGroup(), new \Base3Moodle\Group\MoodleAuthenticatedGroup(),
+	new \Base3\Usermanager\Definition\Base3AnonymousGroup(), new \Base3\Usermanager\Definition\Base3AuthenticatedGroup(),
 	new \Base3Moodle\Group\MoodleAdministrationGroup(), new \Base3MoodleLab\Group\MoodleLabDevelopmentGroup()
 ];
-$map->registry[\Base3\Authorization\Api\IFeature::class] = [new \PulseCore\Feature\PulseCorePlayFeature()];
+$map->registry[\Base3\Authorization\Api\IFeature::class] = [new \ClientStack\GlobalChatbotLauncher\GlobalChatbotLauncherFeature(new \Base3\Translation\NoTranslation\NoTranslation())];
+check(!class_exists(\Base3Moodle\Group\MoodleAnonymousGroup::class)
+	&& !class_exists(\Base3Moodle\Group\MoodleAuthenticatedGroup::class),
+	'Moodle reuses the canonical Framework anonymous and authenticated groups');
 $evaluator = new \Base3\Usermanager\UserCriterionEvaluator($map);
 $store = new TestSettingsStore();
 $features = new \Base3Moodle\Service\MoodleFeatureConfiguration($store, $evaluator, $map);
 $groups = new \Base3Moodle\Service\MoodleGroupConfiguration($store, $map, $evaluator, $features);
 $users = new \Base3Moodle\Adapter\MoodleUsermanager($groups, $evaluator);
 $service = new \Base3Moodle\Authorization\MoodleAuthorizationService($users, $map, $evaluator, $features);
-$checkFeature = new \Base3\Authorization\Dto\AuthorizationRequest('moodle', \Base3\Usermanager\Permission::for('feature', 'pulsecoreplayfeature'));
-check($service->decide($checkFeature)->isAllowed(), 'PulseCore default audience allows an authenticated Moodle user');
+$checkFeature = new \Base3\Authorization\Dto\AuthorizationRequest('moodle', \Base3\Usermanager\Permission::for('feature', 'globalchatbotlauncherfeature'));
+check($service->decide($checkFeature)->isAllowed(), 'Global launcher default audience allows an authenticated Moodle user');
 check(in_array('authenticated', array_map(static fn($g) => $g->name, $users->getGroups()), true), 'native authenticated group is discovered through IGroup');
 check(in_array('administration', array_map(static fn($g) => $g->name, $users->getGroups()), true), 'site administrator criterion resolves through native Moodle');
 check(!in_array('development', array_map(static fn($g) => $g->name, $users->getGroups()), true), 'site administrator is not automatically a developer');
@@ -110,8 +94,8 @@ check($expr['any'][0]['criterion'] === 'moodlerolecriterion', 'Moodle feature ro
 check($evaluator->matches($users->getUser(), $expr, ['authenticated']), 'native role criterion matches user');
 check($evaluator->matches($users->getUser(), ['criterion' => 'moodlecoursegroupcriterion', 'config' => ['course_id' => 5, 'group_id' => 20]]), 'course group criterion delegates to Moodle');
 check(!$evaluator->matches($users->getUser(), ['criterion' => 'moodlecoursegroupcriterion', 'config' => ['course_id' => 6, 'group_id' => 20]]), 'foreign course group cannot match');
-$features->replaceAll(['pulsecoreplayfeature' => []], array_map(static fn($g): string => $g->name, $groups->getGroups()));
-check(!$service->decide($checkFeature)->isAllowed(), 'explicitly empty feature audience denies PulseCore');
+$features->replaceAll(['globalchatbotlauncherfeature' => []], array_map(static fn($g): string => $g->name, $groups->getGroups()));
+check(!$service->decide($checkFeature)->isAllowed(), 'explicitly empty feature audience denies shared launcher');
 $native = new \Base3\Authorization\Dto\AuthorizationRequest('moodle', \Base3\Usermanager\Permission::for('moodle','moodle/course:view'),
 	new \Base3\Authorization\Dto\ResourceReference('moodle','context_id',77));
 check($service->decide($native)->isAllowed(), 'native Moodle capabilities resolved against explicit context');
@@ -126,7 +110,7 @@ $batch = $service->decideMany(['allowed' => $native, 13 => $invalid]);
 check(array_keys($batch) === ['allowed',13] && $batch['allowed']->isAllowed() && !$batch[13]->isAllowed(), 'batched decisions preserve keys');
 $groups->create('marketing', 'Marketing team');
 check(in_array('marketing', array_map(static fn($g) => $g->name, $groups->getGroups()), true), 'custom group appears in canonical catalog');
-$features->replaceAll(['pulsecoreplayfeature' => ['group' => 'marketing']], array_map(static fn($g) => $g->name, $groups->getGroups()));
+$features->replaceAll(['globalchatbotlauncherfeature' => ['group' => 'marketing']], array_map(static fn($g) => $g->name, $groups->getGroups()));
 try { $groups->remove('marketing'); throw new RuntimeException('Missing reference enforcement.'); }
 catch (InvalidArgumentException) { echo "PASS: referenced groups cannot be removed\n"; }
 check($store->saves === 3, 'feature and group updates use one native-backed dataset write each');
@@ -140,7 +124,7 @@ check(in_array('development', array_map(static fn($group): string => $group->nam
     'Moodle native role can explicitly grant BASE3 development membership');
 check(!$roleMatchedAuthorization->decide(new \Base3\Authorization\Dto\AuthorizationRequest('moodle', \Base3\Usermanager\Permission::for('system', 'admin')))->isAllowed(),
     'BASE3 development membership does not bypass native Moodle administrator rights');
-$features->replaceAll(['pulsecoreplayfeature' => ['group' => 'development']],
+$features->replaceAll(['globalchatbotlauncherfeature' => ['group' => 'development']],
     array_map(static fn($group): string => $group->name, $groups->getGroups()));
 check($roleMatchedAuthorization->decide($checkFeature)->isAllowed(),
     'Feature audience can reference the explicitly granted development group');
@@ -148,14 +132,16 @@ check($store->saves === 5, 'role-group and feature audience assignments each per
 echo "MoodleAuthorizationSmokeTest OK.\n";
 
 // Host administration adapter and the exact shared ClientStack template contracts.
-$DB = new class {
-	public function get_records(string $table, array $conditions = [], string $sort = '', string $fields = '*'): array {
-		if ($table === 'role') return [(object)['id' => 7, 'shortname' => 'manager']];
-		throw new RuntimeException('Unexpected Moodle database read in audience smoke test.');
-	}
-};
+$DB = new SmokeMoodleDatabase();
+$nonDeveloperGroups = new \Base3Moodle\Service\MoodleGroupConfiguration(
+	new TestSettingsStore(), $map, $evaluator, $features
+);
+$nonDeveloperUsers = new \Base3Moodle\Adapter\MoodleUsermanager($nonDeveloperGroups, $evaluator);
+$nonDeveloperAuthorization = new \Base3Moodle\Authorization\MoodleAuthorizationService(
+	$nonDeveloperUsers, $map, $evaluator, $features
+);
 $forbidden = new \Base3Moodle\Authorization\MoodleAudienceAdministrationService(
-	$service, $users, $groups, $features, $editor, $map
+	$nonDeveloperAuthorization, $nonDeveloperUsers, $nonDeveloperGroups, $features, $editor, $map
 );
 $GLOBALS['siteAdmin'] = true;
 try { $forbidden->getGroupView(); throw new RuntimeException('Missing BASE3 development guard.'); }
@@ -166,7 +152,7 @@ $GLOBALS['siteAdmin'] = false;
 $admin = new \Base3Moodle\Authorization\MoodleAudienceAdministrationService(
 	$roleMatchedAuthorization, $roleMatchedUsermanager, $groups, $features, $editor, $map
 );
-try { $admin->replaceFeatureRules(['pulsecoreplayfeature' => []]); throw new RuntimeException('Missing Moodle administrator guard.'); }
+try { $admin->replaceFeatureRules(['globalchatbotlauncherfeature' => []]); throw new RuntimeException('Missing Moodle administrator guard.'); }
 catch (RuntimeException $error) {
 	check($error->getMessage() === 'Moodle site administration is required.', 'developer without native Moodle administration cannot save features');
 }
@@ -181,7 +167,7 @@ check(($groupView['defaultGroup'] ?? null) === ''
 	&& ($groupView['roleOptions'][0] ?? null) === ['id' => 7, 'label' => 'manager']
 	&& isset($groupView['criterionOptions'][0]['schema']), 'group data uses shared template shape with Moodle role IDs and criterion schemas');
 $featureView = $admin->getFeatureView();
-check(($featureView['rows'][0]['name'] ?? null) === 'pulsecoreplayfeature'
+check(($featureView['rows'][0]['name'] ?? null) === 'globalchatbotlauncherfeature'
 	&& ($featureView['rows'][0]['rules'][0]['value'] ?? null) === 'development'
 	&& in_array('marketing', $featureView['groups'], true), 'feature data uses shared template shape and preserves stored audiences');
 $previousSaves = $store->saves;
@@ -212,21 +198,13 @@ check(in_array('marketing', array_map(static fn($group): string => $group->name,
 $USER = $originalUser;
 $GLOBALS['siteAdmin'] = true;
 $previousSaves = $store->saves;
-$admin->replaceFeatureRules(['pulsecoreplayfeature' => [['kind' => 'group', 'value' => 'development']]]);
-check($store->saves === $previousSaves + 1 && $features->getAudience(new \PulseCore\Feature\PulseCorePlayFeature()) === ['any' => [['group' => 'development']]],
+$admin->replaceFeatureRules(['globalchatbotlauncherfeature' => [['kind' => 'group', 'value' => 'development']]]);
+check($store->saves === $previousSaves + 1 && $features->getAudience(new \ClientStack\GlobalChatbotLauncher\GlobalChatbotLauncherFeature(new \Base3\Translation\NoTranslation\NoTranslation())) === ['any' => [['group' => 'development']]],
 	'feature edits use the existing persisted audience schema and one settings write');
 check(\ClientStack\Display\AuthorizationGroupsDisplay::getName() === 'authorizationgroupsdisplay'
 	&& \ClientStack\Display\AuthorizationFeaturesDisplay::getName() === 'authorizationfeaturesdisplay',
 	'both shared ClientStack display classes are used unchanged');
-$renderer = new class {
-	public array $_ = [];
-	public function render(string $file, array $data): string {
-		$this->_ = $data;
-		ob_start();
-		try { require $file; return (string)ob_get_clean(); }
-		catch (Throwable $error) { ob_end_clean(); throw $error; }
-	}
-};
+$renderer = new SmokeTemplateRenderer();
 $sharedTemplates = $modules . '/ClientStack/tpl/Display/';
 $groupHtml = $renderer->render($sharedTemplates . 'AuthorizationGroupsDisplay.php', array_merge(
 	$admin->getGroupView(), ['endpoint' => '/local/base3/ajax.php', 'csrf' => 'test-token', 'translations' => [], 'message' => '']
@@ -238,7 +216,31 @@ $featureHtml = $renderer->render($sharedTemplates . 'AuthorizationFeaturesDispla
 	$admin->getFeatureView(), ['endpoint' => '/local/base3/ajax.php', 'csrf' => 'test-token', 'translations' => [], 'message' => '']
 ));
 check(str_contains($featureHtml, 'data-base3-display="authorizationfeaturesdisplay"')
-	&& str_contains($featureHtml, 'base3_feature_csrf') && str_contains($featureHtml, 'pulsecoreplayfeature'),
+	&& str_contains($featureHtml, 'base3_feature_csrf') && str_contains($featureHtml, 'globalchatbotlauncherfeature'),
 	'common features template renders persisted Moodle audiences');
 echo "Moodle shared administration contract and templates OK.\n";
+
+// A native Moodle site administrator with the exact project bootstrap login must
+// be able to open the shared Features tab without a preexisting audience override.
+$map->registry[\Base3\Authorization\Api\IFeature::class][] = new \ClientStack\SettingsTab\AuthorizationfeaturesSettingsTab(
+	new \Base3\Translation\NoTranslation\NoTranslation(), $service
+);
+$bootstrapStore = new TestSettingsStore();
+$bootstrapFeatures = new \Base3Moodle\Service\MoodleFeatureConfiguration($bootstrapStore, $evaluator, $map);
+$bootstrapGroups = new \Base3Moodle\Service\MoodleGroupConfiguration($bootstrapStore, $map, $evaluator, $bootstrapFeatures);
+$bootstrapUsers = new \Base3Moodle\Adapter\MoodleUsermanager($bootstrapGroups, $evaluator);
+$bootstrapAuthorization = new \Base3Moodle\Authorization\MoodleAuthorizationService(
+	$bootstrapUsers, $map, $evaluator, $bootstrapFeatures
+);
+$USER = clone $originalUser;
+$USER->username = 'admin';
+$GLOBALS['siteAdmin'] = true;
+check(in_array('development', array_map(static fn($group): string => $group->name, $bootstrapUsers->getGroups()), true),
+	'exact Moodle bootstrap login is a member of the BASE3 development group');
+$featuresTab = new \ClientStack\SettingsTab\AuthorizationfeaturesSettingsTab(
+	new \Base3\Translation\NoTranslation\NoTranslation(), $bootstrapAuthorization
+);
+check($featuresTab->isVisible(), 'native Moodle administrator with fixed development membership sees the shared Features tab');
+$USER = $originalUser;
+
 

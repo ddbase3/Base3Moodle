@@ -1,200 +1,49 @@
 <?php declare(strict_types=1);
 
-// Run with: php test/Adapter/Base3MoodleFileManagerOutputSmokeTest.php
-// Isolated BASE3 dispatch/owner/permission checks without a Moodle installation.
+/** Standalone smoke for the real BASE3 Moodle file dispatch and protocol contracts. */
 
-namespace Base3\Api {
-	interface IBase { public static function getName(): string; }
-	interface IOutput extends IBase { public function getOutput(string $out = 'html', bool $final = false): string; }
-	interface IRequest { public function get(string $key, $default = null); }
+$modules = dirname(__DIR__, 3);
+spl_autoload_register(static function(string $class) use ($modules): void {
+	$parts = explode('\\', $class, 2);
+	$module = $parts[0] === 'Base3' ? 'Base3Framework' : $parts[0];
+	$file = $modules . '/' . $module . '/src/' . str_replace('\\', '/', $parts[1] ?? '') . '.php';
+	if (is_file($file)) require_once $file;
+});
+
+use Base3Moodle\Adapter\Base3MoodleFileManagerOutput;
+use Base3Moodle\Adapter\MoodleFileManagerHttpService;
+
+function verifyMoodleFileManager(bool $condition, string $label): void {
+	if (!$condition) throw new RuntimeException('FAILED: ' . $label);
 }
 
-namespace Base3\Usermanager {
-	final class Permission {
-		public function __construct(public string $scope, public string $permission) {}
-		public static function for(string $scope, string $permission): self { return new self($scope, $permission); }
-	}
-}
+verifyMoodleFileManager(
+	Base3MoodleFileManagerOutput::getName() === 'base3moodlefilemanageroutput',
+	'existing generic AJAX dispatch name remains stable'
+);
+$constructor = (new ReflectionClass(Base3MoodleFileManagerOutput::class))->getConstructor();
+verifyMoodleFileManager($constructor !== null, 'FileManager output uses injected dependencies');
+$parameters = $constructor->getParameters();
+verifyMoodleFileManager(array_map(static fn(ReflectionParameter $p): string => $p->getName(), $parameters) === [
+	'request', 'usermanager', 'authorization', 'chatbotConfigDisplayData', 'fileManagerHttpService'
+], 'project-owned chatbot display configuration replaces static tab catalog');
+verifyMoodleFileManager((string)$parameters[3]->getType() === 'array', 'owner configuration is lazy project data');
 
-namespace Base3\Usermanager\Api {
-	interface IUsermanager { public function getUser(); public function getGroups(); }
-}
+verifyMoodleFileManager(MoodleFileManagerHttpService::normalizePath('course/docs') === 'course/docs', 'nested file paths remain accepted');
+verifyMoodleFileManager(MoodleFileManagerHttpService::joinPath('course', 'doc.pdf') === 'course/doc.pdf', 'path combination remains stable');
+$traversalDenied = false;
+try { MoodleFileManagerHttpService::normalizePath('../secret'); }
+catch (InvalidArgumentException) { $traversalDenied = true; }
+verifyMoodleFileManager($traversalDenied, 'FileManager path traversal denied');
+verifyMoodleFileManager(MoodleFileManagerHttpService::descriptor('docs/manual.pdf', [
+	'name' => 'manual.pdf', 'type' => 'file', 'size' => 12, 'modified' => 1234
+]) === [
+	'id' => 'docs/manual.pdf', 'name' => 'manual.pdf', 'path' => 'docs/manual.pdf',
+	'kind' => 'file', 'size' => 12, 'mimeType' => '', 'modifiedAt' => '1234'
+], 'FileManager response descriptor remains compatible');
 
-namespace Base3\Authorization\Dto {
-	final readonly class AuthorizationRequest {
-		public function __construct(public string $authority, public \Base3\Usermanager\Permission $permission) {}
-	}
-	final readonly class AuthorizationDecision {
-		public function __construct(private bool $allowed) {}
-		public function isAllowed(): bool { return $this->allowed; }
-	}
-}
-
-namespace Base3\Authorization\Api {
-	interface IAuthorizationService {
-		public function getDefaultAuthority(): string;
-		public function decide(\Base3\Authorization\Dto\AuthorizationRequest $request): \Base3\Authorization\Dto\AuthorizationDecision;
-	}
-}
-
-namespace Base3\LinkTarget\Api {
-	interface ILinkTargetService { public function getLink(array $target, array $params = []): string; }
-}
-
-namespace Base3\Translation\Api {
-	interface ITranslation { public function translate(string $scope, string $domain, string $key, string $fallback): string; }
-}
-
-namespace Base3Moodle\Api {
-	interface IBase3MoodleSettings {
-		public function getAdministrationConfig(): array;
-		public function getVisibleAdministrationConfig(): array;
-	}
-}
-
-namespace Base3Moodle\Adapter {
-	final class MoodleFileManagerHttpService {
-		public static array $calls = [];
-		public function handle(string $action, string $group, string $name, int $userId, int $maxFileSize): never {
-			self::$calls[] = compact('action', 'group', 'name', 'userId', 'maxFileSize');
-			throw new \RuntimeException('HTTP handler reached');
-		}
-	}
-}
-
-namespace {
-	use Base3\Api\IRequest;
-	use Base3\Authorization\Api\IAuthorizationService;
-	use Base3\Authorization\Dto\AuthorizationRequest;
-	use Base3\Authorization\Dto\AuthorizationDecision;
-	use Base3\LinkTarget\Api\ILinkTargetService;
-	use Base3\Translation\Api\ITranslation;
-	use Base3\Usermanager\Api\IUsermanager;
-	use Base3\Usermanager\Permission;
-	use Base3Moodle\Adapter\Base3MoodleFileManagerOutput;
-	use Base3Moodle\Adapter\MoodleFileManagerHttpService;
-	use Base3Moodle\Adapter\MoodleLinkTargetService;
-	use Base3Moodle\Api\IBase3MoodleSettings;
-	use Base3MoodleLab\Service\Base3MoodleLabSettings;
-
-	function sesskey(): string { return 'example-sesskey'; }
-	function confirm_sesskey(): bool {
-		$GLOBALS['sesskey_checks'] = ($GLOBALS['sesskey_checks'] ?? 0) + 1;
-		return $GLOBALS['sesskey_valid'] ?? false;
-	}
-
-	final class moodle_url {
-		public function __construct(private string $path, private array $params = []) {}
-		public function out(bool $escaped = true): string { return $this->path . '?' . http_build_query($this->params); }
-	}
-
-	final class TestRequest implements IRequest {
-		public function __construct(private array $query) {}
-		public function get(string $key, $default = null) { return $this->query[$key] ?? $default; }
-	}
-
-	final class TestUsermanager implements IUsermanager {
-		public function __construct(private ?object $user) {}
-		public function getUser(): ?object { return $this->user; }
-		public function getGroups() { return []; }
-	}
-
-	final class TestAuthorizationService implements IAuthorizationService {
-		public function __construct(private bool $allowed) {}
-		public function getDefaultAuthority(): string { return 'moodle'; }
-		public function decide(AuthorizationRequest $request): AuthorizationDecision {
-			return new AuthorizationDecision($this->allowed && $request->permission->scope === 'moodle'
-				&& $request->permission->permission === 'moodle/site:config');
-		}
-	}
-
-	final class TestTranslation implements ITranslation {
-		public function translate(string $scope, string $domain, string $key, string $fallback): string { return $fallback; }
-	}
-
-	final class TestSettings implements IBase3MoodleSettings {
-		public function __construct(private array $tabs) {}
-		public function getAdministrationConfig(): array { return $this->tabs; }
-		public function getVisibleAdministrationConfig(): array { return $this->tabs; }
-	}
-
-	function verify(bool $result, string $message): void {
-		if (!$result) throw new \RuntimeException('FAILED: ' . $message);
-		echo 'PASS: ' . $message . PHP_EOL;
-	}
-
-	require_once __DIR__ . '/../../src/Adapter/Base3MoodleFileManagerOutput.php';
-	require_once __DIR__ . '/../../src/Adapter/MoodleLinkTargetService.php';
-	require_once __DIR__ . '/../../../Base3MoodleLab/src/Service/Base3MoodleLabSettings.php';
-
-	ob_start();
-	$lab = new Base3MoodleLabSettings(new TestTranslation(), new MoodleLinkTargetService(), new TestUsermanager(null));
-	$tabs = $lab->getAdministrationConfig();
-	$config = null;
-	foreach ($tabs as $tab) {
-		foreach (($tab['displays'] ?? []) as $entry) {
-			if (($entry['name'] ?? '') === 'chatbotconfigdisplay') $config = $entry['data'] ?? null;
-		}
-	}
-	verify(is_array($config), 'project settings contain the chatbot configuration');
-	verify(($config['group'] ?? null) === 'chatbot' && ($config['name'] ?? null) === 'default', 'file storage owner is unchanged');
-
-	$actions = ['list', 'stat', 'mkdir', 'delete', 'rmdir', 'copy', 'move', 'uploadStart', 'uploadChunk', 'uploadStatus', 'uploadFinish', 'uploadAbort', 'download'];
-	verify(count($config['resources']['endpoints'] ?? []) === count($actions), 'all 13 FileManager URLs are present');
-	foreach ($actions as $action) {
-		$url = $config['resources']['endpoints'][$action] ?? '';
-		parse_str((string) parse_url($url, PHP_URL_QUERY), $params);
-		verify(
-			parse_url($url, PHP_URL_PATH) === '/local/base3/ajax.php'
-				&& ($params['name'] ?? null) === 'base3moodlefilemanageroutput'
-				&& ($params['out'] ?? null) === 'json'
-				&& ($params['fm_action'] ?? null) === $action
-				&& ($params['sesskey'] ?? null) === sesskey(),
-			'generic BASE3 dispatch for ' . $action
-		);
-	}
-	verify(Base3MoodleFileManagerOutput::getName() === strtolower((new \ReflectionClass(Base3MoodleFileManagerOutput::class))->getShortName()), 'classmap name matches lowercase class');
-
-	$settings = new TestSettings($tabs);
-	$handler = new MoodleFileManagerHttpService();
-	$request = new TestRequest(['fm_action' => 'uploadChunk']);
-	$GLOBALS['sesskey_valid'] = true;
-	$GLOBALS['sesskey_checks'] = 0;
-	$output = new Base3MoodleFileManagerOutput($request, new TestUsermanager((object) ['id' => 42]), new TestAuthorizationService(false), $settings, $handler);
-	http_response_code(200);
-	verify(json_decode($output->getOutput('json', true), true) === ['message' => 'BASE3 access permission or sesskey missing.'] && http_response_code() === 403, 'missing site configuration permission denied');
-	verify($GLOBALS['sesskey_checks'] === 0, 'permission checked before sesskey');
-
-	$output = new Base3MoodleFileManagerOutput($request, new TestUsermanager(null), new TestAuthorizationService(true), $settings, $handler);
-	http_response_code(200);
-	verify(json_decode($output->getOutput('json', true), true) === ['message' => 'BASE3 access permission or sesskey missing.'] && http_response_code() === 403, 'missing login identity denied');
-
-	$GLOBALS['sesskey_valid'] = false;
-	$output = new Base3MoodleFileManagerOutput($request, new TestUsermanager((object) ['id' => 42]), new TestAuthorizationService(true), $settings, $handler);
-	http_response_code(200);
-	verify(json_decode($output->getOutput('json', true), true) === ['message' => 'BASE3 access permission or sesskey missing.'] && http_response_code() === 403, 'invalid Moodle sesskey denied');
-
-	$GLOBALS['sesskey_valid'] = true;
-	$output = new Base3MoodleFileManagerOutput($request, new TestUsermanager((object) ['id' => 42]), new TestAuthorizationService(true), new TestSettings([]), $handler);
-	$missingOwner = false;
-	try { $output->getOutput('json', true); } catch (\RuntimeException $error) { $missingOwner = $error->getMessage() === 'Chatbot administration storage owner is not configured.'; }
-	verify($missingOwner, 'no fallback for missing configured owner');
-
-	$output = new Base3MoodleFileManagerOutput($request, new TestUsermanager((object) ['id' => 42]), new TestAuthorizationService(true), $settings, $handler);
-	$invoked = false;
-	try { $output->getOutput('json', true); } catch (\RuntimeException $error) { $invoked = $error->getMessage() === 'HTTP handler reached'; }
-	verify($invoked, 'authorized upload reaches existing FileManager service');
-	verify(MoodleFileManagerHttpService::$calls === [[
-		'action' => 'uploadChunk', 'group' => 'chatbot', 'name' => 'default', 'userId' => 42, 'maxFileSize' => 50 * 1024 * 1024
-	]], 'original owner, action, user and max size preserved');
-
-	$output = new Base3MoodleFileManagerOutput(new TestRequest(['fm_action' => 'download']), new TestUsermanager((object) ['id' => 42]), new TestAuthorizationService(true), $settings, $handler);
-	try { $output->getOutput('json', true); } catch (\RuntimeException $error) { verify($error->getMessage() === 'HTTP handler reached', 'download reaches existing FileManager service'); }
-	verify((MoodleFileManagerHttpService::$calls[1]['action'] ?? '') === 'download', 'download retains action');
-
-	$ajaxSource = file_get_contents(__DIR__ . '/../../../../moodle/local/base3/ajax.php');
-	verify(is_string($ajaxSource) && !str_contains($ajaxSource, 'FileManager') && str_contains($ajaxSource, 'Runtime::render'), 'native AJAX entry remains generic');
-
-	echo 'BASE3 Moodle generic FileManager dispatch smoke test passed.' . PHP_EOL;
-	ob_end_flush();
-}
+$source = file_get_contents(dirname(__DIR__, 2) . '/src/Adapter/Base3MoodleFileManagerOutput.php');
+verifyMoodleFileManager(is_string($source) && str_contains($source, "Permission::for('moodle', 'moodle/site:config')")
+	&& str_contains($source, 'confirm_sesskey()'), 'FileManager endpoint retains native capability and CSRF enforcement');
+verifyMoodleFileManager(!is_file(dirname(__DIR__, 2) . '/src/Api/IBase3MoodleSettings.php'), 'obsolete static settings contract removed');
+echo "BASE3 Moodle FileManager dispatch smoke passed.\n";

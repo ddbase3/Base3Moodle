@@ -1,5 +1,35 @@
 # Base3Moodle
 
+## Generic settings and Moodle File API (6 November 2026)
+
+The native Moodle administration entry renders the common
+`ClientStack\Display\SettingsDisplay`, discovering `UiFoundation\Api\ISettingsTab`
+contributions through `IClassMap`. It does not own a second tab catalog.
+`Runtime::assertDisplayAccess()` checks native `moodle/site:config` for the
+settings entry and protected administration displays, plus tab visibility for
+direct display access. `MoodleAudienceAdministrationService` retains the
+native site-admin and BASE3 `development` checks for group/feature edits.
+
+`MoodleFileStorage`, `MoodleFileStorageFactory` and
+`MoodleManagedFileStorageService` implement the existing ResourceFoundation
+storage contracts using `get_file_storage()` and `stored_file` operations.
+Completed files live in private Moodle component `local_base3`, area
+`base3storage`, system context, item ID 0, partitioned by storage mode and
+SHA-256 logical owner. There is no parallel local-file or metadata database.
+The generic FileManager HTTP action names and current `chatbot/default` owner
+are unchanged. `MoodleFileUploadService` still handles transient chunks and
+streaming assembly; finished files use `create_file_from_pathname`, downloads
+use `send_stored_file`. Do not install FileBridge for this integration.
+
+No legacy files need importing in the accepted development environment.
+Tests: `test/Adapter/MoodleNativeFileStorageSmokeTest.php` and
+`test/Adapter/Base3MoodleFileManagerOutputSmokeTest.php`. Moodle's actual
+File API, HTTP/session permissions, browser interaction and rollback need
+integrated testing on the real host before production rollout. See
+`PRIVACY.md` for lifecycle and retention limitations.
+
+# Base3Moodle
+
 Native Moodle integration of BASE3 services and the common BASE3 authorization contracts.
 The Moodle host remains the single authority for Moodle identities, context-specific
 capabilities, role assignments, and course groups. BASE3 does not replicate Moodle RBAC
@@ -37,8 +67,11 @@ host-managed `Group` records. Code-owned membership expressions remain
 immutable. Additional criteria configured by administrators are OR-combined
 with the fixed expression; they cannot revoke code-owned members.
 
-Available code-defined groups include `anonymous`, `authenticated`, and
-`administration`. `Base3MoodleLab` separately owns the code-defined
+The built-in `anonymous` and `authenticated` groups belong exclusively to
+`Base3Framework` through `Base3AnonymousGroup` and `Base3AuthenticatedGroup`.
+The previous Moodle-specific declarations of these same logical groups are
+obsolete and must be removed during deployment. `Base3Moodle` only contributes
+the native site-administrator `administration` group; `Base3MoodleLab` owns the
 `development` group for this project. Host-defined groups have unique logical
 names and share the same evaluator. Group criteria must not refer to another
 BASE3 group. Consequently there is no group dependency cycle.

@@ -9,9 +9,9 @@ use RuntimeException;
 final class MoodleFileStorageFactory implements IFileStorageFactory {
 
 	public function openStorage(string $id, string $mode): IFileStorage {
-		if (!preg_match('/^[a-zA-Z0-9_-]{1,160}$/', $id) || !preg_match('/^[a-zA-Z0-9_-]{1,40}$/', $mode)) {
+		if (!preg_match('/^[a-f0-9]{64}$/', $id) || !in_array($mode, ['collection', 'container'], true)) {
 			throw new RuntimeException('Invalid BASE3 file storage identifier.');
 		}
-		return new MoodleFileStorage(DIR_LOCAL . 'storage/' . $mode . '/' . $id);
+		return new MoodleFileStorage($id, $mode);
 	}
 }
