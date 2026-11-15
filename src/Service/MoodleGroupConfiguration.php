@@ -1,12 +1,12 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Service;
+namespace Base3\Base3Moodle\Service;
 
-use Base3\Api\IClassMap;
-use Base3\Settings\Api\ISettingsStore;
-use Base3\Usermanager\Api\IGroup;
-use Base3\Usermanager\Group;
-use Base3\Usermanager\UserCriterionEvaluator;
+use Base3\CoreFoundation\Api\IClassMap;
+use Base3\CoreFoundation\Settings\Api\ISettingsStore;
+use Base3\CoreFoundation\Usermanager\Api\IGroup;
+use Base3\CoreFoundation\Usermanager\Group;
+use Base3\Core\Usermanager\UserCriterionEvaluator;
 use InvalidArgumentException;
 
 /** One canonical host-owned dataset for code-group additions and managed BASE3 groups. */

@@ -1,9 +1,9 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Adapter;
+namespace Base3\Base3Moodle\Adapter;
 
-use ResourceFoundation\Api\IFileStorage;
-use ResourceFoundation\Api\IFileStorageFactory;
+use Base3\ResourceFoundation\Api\IFileStorage;
+use Base3\ResourceFoundation\Api\IFileStorageFactory;
 use RuntimeException;
 
 final class MoodleFileStorageFactory implements IFileStorageFactory {

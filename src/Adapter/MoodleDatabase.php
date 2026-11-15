@@ -1,8 +1,8 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Adapter;
+namespace Base3\Base3Moodle\Adapter;
 
-use Base3\Database\Api\IDatabase;
+use Base3\CoreFoundation\Database\Api\IDatabase;
 use RuntimeException;
 use Throwable;
 

@@ -2,12 +2,12 @@
 
 /** CLI-only test of the Moodle storage API boundary and owner isolation. */
 
-use Base3Moodle\Adapter\MoodleFileManagerHttpService;
-use Base3Moodle\Adapter\MoodleFileStorageFactory;
-use Base3Moodle\Adapter\MoodleFileUploadService;
-use Base3Moodle\Adapter\MoodleManagedFileStorageService;
-use Base3Moodle\Test\Support\FakeMoodleFileStorage;
-use ResourceFoundation\Api\IManagedFileStorageService;
+use Base3\Base3Moodle\Adapter\MoodleFileManagerHttpService;
+use Base3\Base3Moodle\Adapter\MoodleFileStorageFactory;
+use Base3\Base3Moodle\Adapter\MoodleFileUploadService;
+use Base3\Base3Moodle\Adapter\MoodleManagedFileStorageService;
+use Base3\Base3Moodle\Test\Support\FakeMoodleFileStorage;
+use Base3\ResourceFoundation\Api\IManagedFileStorageService;
 
 require_once __DIR__ . '/../../../ResourceFoundation/src/Api/IFileStorage.php';
 require_once __DIR__ . '/../../../ResourceFoundation/src/Api/IFileStorageFactory.php';

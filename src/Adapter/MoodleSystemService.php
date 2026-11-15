@@ -1,8 +1,8 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Adapter;
+namespace Base3\Base3Moodle\Adapter;
 
-use Base3\Api\ISystemService;
+use Base3\CoreFoundation\Api\ISystemService;
 
 final class MoodleSystemService implements ISystemService {
 	public function getHostSystemName(): string { return 'Moodle'; }

@@ -1,15 +1,15 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Authorization;
+namespace Base3\Base3Moodle\Authorization;
 
-use Base3\Api\IClassMap;
-use Base3\Authorization\Api\IAuthorizationService;
-use Base3\Authorization\Api\IFeature;
-use Base3\Authorization\Dto\AuthorizationDecision;
-use Base3\Authorization\Dto\AuthorizationRequest;
-use Base3\Usermanager\Api\IUsermanager;
-use Base3\Usermanager\UserCriterionEvaluator;
-use Base3Moodle\Service\MoodleFeatureConfiguration;
+use Base3\CoreFoundation\Api\IClassMap;
+use Base3\CoreFoundation\Authorization\Api\IAuthorizationService;
+use Base3\CoreFoundation\Authorization\Api\IFeature;
+use Base3\CoreFoundation\Authorization\Dto\AuthorizationDecision;
+use Base3\CoreFoundation\Authorization\Dto\AuthorizationRequest;
+use Base3\CoreFoundation\Usermanager\Api\IUsermanager;
+use Base3\Core\Usermanager\UserCriterionEvaluator;
+use Base3\Base3Moodle\Service\MoodleFeatureConfiguration;
 use InvalidArgumentException;
 use Throwable;
 

@@ -2,8 +2,8 @@
 
 namespace Base3MoodleTest\Adapter;
 
-use Base3\Usermanager\Api\IUsermanager;
-use Base3Moodle\Adapter\MoodleUsermanager;
+use Base3\CoreFoundation\Usermanager\Api\IUsermanager;
+use Base3\Base3Moodle\Adapter\MoodleUsermanager;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 use ReflectionClass;

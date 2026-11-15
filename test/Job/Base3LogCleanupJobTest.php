@@ -2,30 +2,30 @@
 
 // Run with: php test/Job/Base3LogCleanupJobTest.php
 // Uses the installed, unmodified BASE3 Framework contracts.
-$framework = dirname(__DIR__, 3) . '/Base3Framework/src/';
+$modules = dirname(__DIR__, 3);
 foreach ([
-	'Api/IBase.php',
-	'Api/ISchemaProvider.php',
-	'Database/Api/IDatabase.php',
-	'Configuration/Api/IConfiguration.php',
-	'Configuration/AbstractConfiguration.php',
-	'Worker/Api/IJob.php',
-	'Worker/Api/IJobExecutionPolicy.php',
-	'Worker/Api/IPolicyControlledJob.php',
-	'Worker/Policy/PolicyControlledJobTrait.php',
-	'Worker/Policy/AbstractJobExecutionPolicy.php'
+	'CoreFoundation/src/Api/IBase.php',
+	'CoreFoundation/src/Api/ISchemaProvider.php',
+	'CoreFoundation/src/Database/Api/IDatabase.php',
+	'CoreFoundation/src/Configuration/Api/IConfiguration.php',
+	'CoreFoundation/src/Configuration/AbstractConfiguration.php',
+	'CoreFoundation/src/Worker/Api/IJob.php',
+	'CoreFoundation/src/Worker/Api/IJobExecutionPolicy.php',
+	'CoreFoundation/src/Worker/Api/IPolicyControlledJob.php',
+	'CoreFoundation/src/Worker/Policy/PolicyControlledJobTrait.php',
+	'CoreFoundation/src/Worker/Policy/AbstractJobExecutionPolicy.php'
 ] as $file) {
-	require_once $framework . $file;
+	require_once $modules . '/' . $file;
 }
 require_once dirname(__DIR__, 2) . '/src/Job/Base3LogCleanupJob.php';
 
-final class CleanupTestConfiguration extends \Base3\Configuration\AbstractConfiguration {
+final class CleanupTestConfiguration extends \Base3\CoreFoundation\Configuration\AbstractConfiguration {
 	public function __construct(private array $values = []) {}
 	protected function load(): array { return ['job' => $this->values]; }
 	protected function saveData(array $data): bool { return true; }
 }
 
-final class CleanupTestDatabase implements \Base3\Database\Api\IDatabase {
+final class CleanupTestDatabase implements \Base3\CoreFoundation\Database\Api\IDatabase {
 	public bool $exists = true;
 	public bool $failDelete = false;
 	public int $deletes = 0;
@@ -54,7 +54,7 @@ final class CleanupTestDatabase implements \Base3\Database\Api\IDatabase {
 	public function errorMessage(): string { return $this->error ? 'simulated failure' : ''; }
 }
 
-final class CleanupTestPolicy extends \Base3\Worker\Policy\AbstractJobExecutionPolicy {
+final class CleanupTestPolicy extends \Base3\CoreFoundation\Worker\Policy\AbstractJobExecutionPolicy {
 	public int $marks = 0;
 	public static function getName(): string { return 'cleanuptestpolicy'; }
 	public function shouldRun(string $jobName) { return true; }
@@ -68,7 +68,7 @@ function check(bool $condition, string $message): void {
 $config = new CleanupTestConfiguration();
 $db = new CleanupTestDatabase();
 $policy = new CleanupTestPolicy();
-$job = new \Base3Moodle\Job\Base3LogCleanupJob($db, $config);
+$job = new \Base3\Base3Moodle\Job\Base3LogCleanupJob($db, $config);
 $job->setExecutionPolicy($policy);
 check($job->isActive(), 'Cleanup is active by default.');
 check($job->getPriority() === 1, 'Default cleanup priority.');
@@ -81,7 +81,7 @@ check(str_contains($db->deleteSql, 'WHERE `timestamp` <'), 'Cleanup filters by t
 $db = new CleanupTestDatabase();
 $db->exists = false;
 $policy = new CleanupTestPolicy();
-$job = new \Base3Moodle\Job\Base3LogCleanupJob($db, $config);
+$job = new \Base3\Base3Moodle\Job\Base3LogCleanupJob($db, $config);
 $job->setExecutionPolicy($policy);
 check(str_contains($job->go(), 'Skip'), 'Missing log table is skipped.');
 check($db->deletes === 0 && $policy->marks === 0, 'Missing table is not marked as run.');
@@ -89,7 +89,7 @@ check($db->deletes === 0 && $policy->marks === 0, 'Missing table is not marked a
 $db = new CleanupTestDatabase();
 $db->failDelete = true;
 $policy = new CleanupTestPolicy();
-$job = new \Base3Moodle\Job\Base3LogCleanupJob($db, $config);
+$job = new \Base3\Base3Moodle\Job\Base3LogCleanupJob($db, $config);
 $job->setExecutionPolicy($policy);
 try {
 	$job->go();
@@ -100,7 +100,7 @@ try {
 check($policy->marks === 0, 'Failed deletion is not marked as run.');
 
 $disabled = new CleanupTestConfiguration(['base3logcleanupjob.active' => false]);
-$job = new \Base3Moodle\Job\Base3LogCleanupJob(new CleanupTestDatabase(), $disabled);
+$job = new \Base3\Base3Moodle\Job\Base3LogCleanupJob(new CleanupTestDatabase(), $disabled);
 check(!$job->isActive(), 'Cleanup can be disabled by the normal configuration.');
 
 echo "BASE3 Moodle log cleanup contract tests passed.\n";

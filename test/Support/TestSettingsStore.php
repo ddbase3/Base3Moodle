@@ -1,8 +1,8 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Test\Support;
+namespace Base3\Base3Moodle\Test\Support;
 
-class TestSettingsStore implements \Base3\Settings\Api\ISettingsStore {
+class TestSettingsStore implements \Base3\CoreFoundation\Settings\Api\ISettingsStore {
 	public array $data = [];
 	public int $saves = 0;
 	public function get(string $group, string $name, array $default = []): array { return $this->data[$group][$name] ?? $default; }

@@ -1,6 +1,6 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Adapter;
+namespace Base3\Base3Moodle\Adapter;
 
 use Base3\Core\Request;
 

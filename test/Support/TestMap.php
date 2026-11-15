@@ -1,8 +1,8 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Test\Support;
+namespace Base3\Base3Moodle\Test\Support;
 
-class TestMap implements \Base3\Api\IClassMap {
+class TestMap implements \Base3\CoreFoundation\Api\IClassMap {
 	public array $registry = [];
 	public array $names = [];
 	public function instantiate(string $class) { return null; }

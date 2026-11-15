@@ -1,8 +1,8 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Adapter;
+namespace Base3\Base3Moodle\Adapter;
 
-use ResourceFoundation\Api\IManagedFileStorageService;
+use Base3\ResourceFoundation\Api\IManagedFileStorageService;
 
 use FilesystemIterator;
 use InvalidArgumentException;

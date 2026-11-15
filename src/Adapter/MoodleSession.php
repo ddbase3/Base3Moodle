@@ -1,8 +1,8 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Adapter;
+namespace Base3\Base3Moodle\Adapter;
 
-use Base3\Session\Api\ISession;
+use Base3\CoreFoundation\Session\Api\ISession;
 
 /** Stores BASE3 keys under Moodle's managed session; never destroys Moodle login state. */
 final class MoodleSession implements ISession {

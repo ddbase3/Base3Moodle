@@ -1,13 +1,13 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Adapter;
+namespace Base3\Base3Moodle\Adapter;
 
-use Base3\Usermanager\Api\IUsermanager;
-use Base3\Usermanager\Permission;
-use Base3\Usermanager\Role;
-use Base3\Usermanager\User;
-use Base3\Usermanager\UserCriterionEvaluator;
-use Base3Moodle\Service\MoodleGroupConfiguration;
+use Base3\CoreFoundation\Usermanager\Api\IUsermanager;
+use Base3\CoreFoundation\Usermanager\Permission;
+use Base3\CoreFoundation\Usermanager\Role;
+use Base3\CoreFoundation\Usermanager\User;
+use Base3\Core\Usermanager\UserCriterionEvaluator;
+use Base3\Base3Moodle\Service\MoodleGroupConfiguration;
 
 /** Exposes native Moodle identity and system-context role metadata to BASE3. */
 final class MoodleUsermanager implements IUsermanager {

@@ -1,8 +1,8 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Adapter;
+namespace Base3\Base3Moodle\Adapter;
 
-use Base3\LinkTarget\Api\ILinkTargetService;
+use Base3\CoreFoundation\LinkTarget\Api\ILinkTargetService;
 
 final class MoodleLinkTargetService implements ILinkTargetService {
 

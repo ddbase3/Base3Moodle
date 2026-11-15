@@ -2,18 +2,18 @@
 
 // Run with: php test/Logger/ScopedLoggerBindingTest.php
 // Exercises the existing Framework logger contract without a live database.
-$framework = dirname(__DIR__, 3) . '/Base3Framework/src/';
+$modules = dirname(__DIR__, 3);
 foreach ([
-	'Database/Api/IDatabase.php',
-	'Logger/Api/ILogger.php',
-	'Logger/LoggerBridgeTrait.php',
-	'Logger/AbstractLogger.php',
-	'Logger/ScopedDatabaseLogger/ScopedDatabaseLogger.php'
+	'CoreFoundation/src/Database/Api/IDatabase.php',
+	'CoreFoundation/src/Logger/Api/ILogger.php',
+	'CoreFoundation/src/Logger/LoggerBridgeTrait.php',
+	'CoreFoundation/src/Logger/AbstractLogger.php',
+	'Core/src/Logger/ScopedDatabaseLogger/ScopedDatabaseLogger.php'
 ] as $file) {
-	require_once $framework . $file;
+	require_once $modules . '/' . $file;
 }
 
-final class LoggerTestDatabase implements \Base3\Database\Api\IDatabase {
+final class LoggerTestDatabase implements \Base3\CoreFoundation\Database\Api\IDatabase {
 	public string $insert = '';
 	public int $writes = 0;
 	public function connect(): void {}
@@ -46,7 +46,7 @@ final class LoggerTestDatabase implements \Base3\Database\Api\IDatabase {
 }
 
 $db = new LoggerTestDatabase();
-$logger = new \Base3\Logger\ScopedDatabaseLogger\ScopedDatabaseLogger($db);
+$logger = new \Base3\Core\Logger\ScopedDatabaseLogger\ScopedDatabaseLogger($db);
 $logger->info('worker cycle', ['scope' => 'masterworker']);
 if ($db->writes !== 1 || !str_contains($db->insert, "'masterworker'")) {
 	throw new \RuntimeException('Scoped logger did not write to base3_log.');

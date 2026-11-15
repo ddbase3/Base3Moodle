@@ -1,9 +1,9 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Adapter;
+namespace Base3\Base3Moodle\Adapter;
 
-use Base3\Api\IAssetResolver;
-use Base3\Api\IModuleRegistry;
+use Base3\CoreFoundation\Api\IAssetResolver;
+use Base3\CoreFoundation\Api\IModuleRegistry;
 
 /** Asset URLs preserve the module's static directory structure for CSS and JS imports. */
 final class MoodleAssetResolver implements IAssetResolver {

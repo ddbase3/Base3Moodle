@@ -1,9 +1,9 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Group;
+namespace Base3\Base3Moodle\Group;
 
-use Base3\Usermanager\Api\IGroup;
-use Base3\Usermanager\Group;
+use Base3\CoreFoundation\Usermanager\Api\IGroup;
+use Base3\CoreFoundation\Usermanager\Group;
 
 final class MoodleAdministrationGroup implements IGroup {
 

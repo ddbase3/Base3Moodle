@@ -1,8 +1,8 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Adapter;
+namespace Base3\Base3Moodle\Adapter;
 
-use Base3\Language\Api\ILanguage;
+use Base3\CoreFoundation\Language\Api\ILanguage;
 
 final class MoodleLanguage implements ILanguage {
 	private ?string $language = null;

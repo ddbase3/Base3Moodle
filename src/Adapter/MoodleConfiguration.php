@@ -1,8 +1,8 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Adapter;
+namespace Base3\Base3Moodle\Adapter;
 
-use Base3\Configuration\AbstractConfiguration;
+use Base3\CoreFoundation\Configuration\AbstractConfiguration;
 
 final class MoodleConfiguration extends AbstractConfiguration {
 

@@ -35,12 +35,10 @@ namespace {
 
 $modules = dirname(__DIR__, 3);
 spl_autoload_register(static function(string $class) use ($modules): void {
-	foreach (['Base3\\' => 'Base3Framework', 'Base3Moodle\\' => 'Base3Moodle'] as $prefix => $module) {
-		if (!str_starts_with($class, $prefix)) continue;
-		$path = $modules . '/' . $module . '/src/' . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
-		if (is_file($path)) require_once $path;
-		return;
-	}
+	$parts = explode('\\', ltrim($class, '\\'), 3);
+	if (($parts[0] ?? '') !== 'Base3' || !isset($parts[1], $parts[2])) return;
+	$path = $modules . '/' . $parts[1] . '/src/' . str_replace('\\', '/', $parts[2]) . '.php';
+	if (is_file($path)) require_once $path;
 });
 
 const PARAM_USERNAME = 1;
@@ -245,19 +243,19 @@ $GLOBALS['lastUserId'] = 4;
 $GLOBALS['queryForTest'] = '';
 $GLOBALS['queryId'] = null;
 
-$manager = (new \ReflectionClass(\Base3Moodle\Adapter\MoodleUsermanager::class))->newInstanceWithoutConstructor();
-$role = \Base3\Usermanager\Role::named('manager');
-$systemAdmin = \Base3\Usermanager\Role::named('admin');
-assertMoodle($manager instanceof \Base3\Usermanager\Api\IUsermanager, 'implements current IUsermanager');
+$manager = (new \ReflectionClass(\Base3\Base3Moodle\Adapter\MoodleUsermanager::class))->newInstanceWithoutConstructor();
+$role = \Base3\CoreFoundation\Usermanager\Role::named('manager');
+$systemAdmin = \Base3\CoreFoundation\Usermanager\Role::named('admin');
+assertMoodle($manager instanceof \Base3\CoreFoundation\Usermanager\Api\IUsermanager, 'implements current IUsermanager');
 assertMoodle($manager->getUser()->role === 'admin' && count($manager->getUser()->roles) === 2, 'detailed current identity includes native and administrator roles');
 assertMoodle($manager->getUserById('0002')->role === 'member' && count($manager->getUserById(2)->roles) === 1, 'target user includes their own native system role');
 foreach (['', '0', '2x', '-2', '2.5', '9223372036854775808', 'teacher'] as $invalid) {
 	assertMoodle($manager->getUserById($invalid) === null, 'reject malformed user ID: ' . $invalid);
 }
 assertMoodle($manager->getUserById(3) === null && $manager->getUserById(4) === null, 'reject guest and deleted accounts');
-assertMoodle($manager->hasRole($role) && $manager->hasRole(\Base3\Usermanager\Role::fromArray(['id' => 7])), 'check native role name and ID');
-assertMoodle(!$manager->hasRole(\Base3\Usermanager\Role::fromArray(['id' => 8, 'name' => 'manager'])), 'contradictory role metadata denies');
-assertMoodle($manager->hasRole($systemAdmin) && !$manager->hasRole(\Base3\Usermanager\Role::named('administration')), 'administrator marker is not a BASE3 group role');
+assertMoodle($manager->hasRole($role) && $manager->hasRole(\Base3\CoreFoundation\Usermanager\Role::fromArray(['id' => 7])), 'check native role name and ID');
+assertMoodle(!$manager->hasRole(\Base3\CoreFoundation\Usermanager\Role::fromArray(['id' => 8, 'name' => 'manager'])), 'contradictory role metadata denies');
+assertMoodle($manager->hasRole($systemAdmin) && !$manager->hasRole(\Base3\CoreFoundation\Usermanager\Role::named('administration')), 'administrator marker is not a BASE3 group role');
 assertMoodle(count($manager->getAllRoles()) === 2 && count($manager->getAllRoles()[0]->permissions) === 0, 'catalog exposes native roles without fictitious effective permissions');
 $permissionKeys = array_map(static fn($p): string => $p->scope . '/' . $p->permission, $manager->getPermissions());
 assertMoodle(in_array('moodle/moodle/user:update', $permissionKeys, true) && in_array('system/admin', $permissionKeys, true), 'current system-context capability metadata is complete');
@@ -288,7 +286,7 @@ assertMoodle($DB->lastSearchParams['userid'] === 2, 'numeric search uses an exac
 assertMoodle($manager->assignRoleToUser(2, $role), 'assign allowed native system role');
 assertMoodle($DB->record_exists('role_assignments', ['roleid' => 7, 'userid' => 2, 'contextid' => 1, 'component' => '']), 'new assignment is manual');
 assertMoodle($manager->revokeRoleFromUser(2, $role), 'revoke manual system role');
-assertMoodle(!$manager->revokeRoleFromUser(2, \Base3\Usermanager\Role::named('teacher')), 'do not remove plugin-owned enrolment assignment');
+assertMoodle(!$manager->revokeRoleFromUser(2, \Base3\CoreFoundation\Usermanager\Role::named('teacher')), 'do not remove plugin-owned enrolment assignment');
 assertMoodle($manager->revokeRoleFromUser(1, $role) === false, 'do not remove own system role');
 assertMoodle(!$manager->assignRoleToUser('2broken', $role) && !$manager->assignRoleToUser(3, $role), 'invalid and guest users denied');
 assertMoodle(!$manager->assignRoleToUser(2, $systemAdmin), 'administrator marker cannot be granted as native role');
@@ -296,12 +294,12 @@ $GLOBALS['assignableRoles'] = [8 => 'Teacher'];
 assertMoodle(!$manager->assignRoleToUser(2, $role), 'native assignability is mandatory');
 $GLOBALS['assignableRoles'] = [7 => 'Manager', 8 => 'Teacher'];
 assertMoodle(!$manager->assignRoleToGroup(100, $role) && !$manager->revokeRoleFromGroup(100, $role), 'no invented group-role mapping');
-$permission = \Base3\Usermanager\Permission::for('moodle', 'moodle/course:view');
+$permission = \Base3\CoreFoundation\Usermanager\Permission::for('moodle', 'moodle/course:view');
 assertMoodle($manager->addPermissionToRole($role, $permission), 'native capability grant uses system context');
 assertMoodle($manager->removePermissionFromRole($role, $permission), 'native capability removal uses system context');
 assertMoodle(!$manager->removePermissionFromRole($role, $permission), 'absent native capability removal rejected');
-assertMoodle(!$manager->addPermissionToRole($role, \Base3\Usermanager\Permission::for('system', 'admin'))
-	&& !$manager->addPermissionToRole($role, \Base3\Usermanager\Permission::for('moodle', 'unknown')), 'reject unsupported permission scopes and capabilities');
+assertMoodle(!$manager->addPermissionToRole($role, \Base3\CoreFoundation\Usermanager\Permission::for('system', 'admin'))
+	&& !$manager->addPermissionToRole($role, \Base3\CoreFoundation\Usermanager\Permission::for('moodle', 'unknown')), 'reject unsupported permission scopes and capabilities');
 
 assertMoodle(!$manager->registUser('new', 'short', ['email' => 'new@example.test']), 'registration enforces Moodle password policy');
 assertMoodle(!$manager->registUser('bad login', 'good-secret', ['email' => 'new@example.test']), 'registration rejects invalid Moodle usernames');

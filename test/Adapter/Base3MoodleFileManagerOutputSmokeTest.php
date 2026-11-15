@@ -4,14 +4,14 @@
 
 $modules = dirname(__DIR__, 3);
 spl_autoload_register(static function(string $class) use ($modules): void {
-	$parts = explode('\\', $class, 2);
-	$module = $parts[0] === 'Base3' ? 'Base3Framework' : $parts[0];
-	$file = $modules . '/' . $module . '/src/' . str_replace('\\', '/', $parts[1] ?? '') . '.php';
+	$parts = explode('\\', ltrim($class, '\\'), 3);
+	if (($parts[0] ?? '') !== 'Base3' || !isset($parts[1], $parts[2])) return;
+	$file = $modules . '/' . $parts[1] . '/src/' . str_replace('\\', '/', $parts[2]) . '.php';
 	if (is_file($file)) require_once $file;
 });
 
-use Base3Moodle\Adapter\Base3MoodleFileManagerOutput;
-use Base3Moodle\Adapter\MoodleFileManagerHttpService;
+use Base3\Base3Moodle\Adapter\Base3MoodleFileManagerOutput;
+use Base3\Base3Moodle\Adapter\MoodleFileManagerHttpService;
 
 function verifyMoodleFileManager(bool $condition, string $label): void {
 	if (!$condition) throw new RuntimeException('FAILED: ' . $label);

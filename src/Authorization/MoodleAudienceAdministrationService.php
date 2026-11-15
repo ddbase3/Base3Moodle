@@ -1,19 +1,19 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Authorization;
+namespace Base3\Base3Moodle\Authorization;
 
-use Base3\Api\IClassMap;
-use Base3\Authorization\Api\IAuthorizationService;
-use Base3\Authorization\Api\IFeature;
-use Base3\Authorization\Dto\AuthorizationRequest;
-use Base3\Usermanager\Api\IUsermanager;
-use Base3\Usermanager\Permission;
-use Base3Moodle\Service\MoodleAudienceEditor;
-use Base3Moodle\Service\MoodleFeatureConfiguration;
-use Base3Moodle\Service\MoodleGroupConfiguration;
+use Base3\CoreFoundation\Api\IClassMap;
+use Base3\CoreFoundation\Authorization\Api\IAuthorizationService;
+use Base3\CoreFoundation\Authorization\Api\IFeature;
+use Base3\CoreFoundation\Authorization\Dto\AuthorizationRequest;
+use Base3\CoreFoundation\Usermanager\Api\IUsermanager;
+use Base3\CoreFoundation\Usermanager\Permission;
+use Base3\Base3Moodle\Service\MoodleAudienceEditor;
+use Base3\Base3Moodle\Service\MoodleFeatureConfiguration;
+use Base3\Base3Moodle\Service\MoodleGroupConfiguration;
 use InvalidArgumentException;
 use RuntimeException;
-use UiFoundation\Api\IAuthorizationAudienceAdministrationService;
+use Base3\UiFoundation\Api\IAuthorizationAudienceAdministrationService;
 
 /** Moodle-owned authorization and persistence adapter for the unmodified ClientStack administration displays. */
 final class MoodleAudienceAdministrationService implements IAuthorizationAudienceAdministrationService {

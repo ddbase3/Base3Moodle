@@ -2,7 +2,7 @@
 
 namespace Base3MoodleTest\Adapter;
 
-use Base3Moodle\Adapter\MoodleDatabase;
+use Base3\Base3Moodle\Adapter\MoodleDatabase;
 use mysqli;
 use mysqli_result;
 use PHPUnit\Framework\TestCase;

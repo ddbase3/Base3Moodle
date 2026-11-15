@@ -1,10 +1,10 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Adapter;
+namespace Base3\Base3Moodle\Adapter;
 
-use Base3\Api\IModuleRegistry;
-use Base3\Language\Api\ILanguage;
-use Base3\Translation\Api\ITranslation;
+use Base3\CoreFoundation\Api\IModuleRegistry;
+use Base3\CoreFoundation\Language\Api\ILanguage;
+use Base3\CoreFoundation\Translation\Api\ITranslation;
 
 final class MoodleTranslation implements ITranslation {
 

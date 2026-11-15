@@ -1,8 +1,8 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Adapter;
+namespace Base3\Base3Moodle\Adapter;
 
-use ResourceFoundation\Api\IFileStorage;
+use Base3\ResourceFoundation\Api\IFileStorage;
 use RuntimeException;
 
 /** Private local_base3 Moodle File API area, partitioned by logical storage identity. */

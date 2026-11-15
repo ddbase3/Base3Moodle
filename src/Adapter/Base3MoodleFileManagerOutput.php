@@ -1,13 +1,13 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Adapter;
+namespace Base3\Base3Moodle\Adapter;
 
-use Base3\Api\IOutput;
-use Base3\Authorization\Api\IAuthorizationService;
-use Base3\Authorization\Dto\AuthorizationRequest;
-use Base3\Api\IRequest;
-use Base3\Usermanager\Api\IUsermanager;
-use Base3\Usermanager\Permission;
+use Base3\CoreFoundation\Api\IOutput;
+use Base3\CoreFoundation\Authorization\Api\IAuthorizationService;
+use Base3\CoreFoundation\Authorization\Dto\AuthorizationRequest;
+use Base3\CoreFoundation\Api\IRequest;
+use Base3\CoreFoundation\Usermanager\Api\IUsermanager;
+use Base3\CoreFoundation\Usermanager\Permission;
 use RuntimeException;
 
 /** Routes existing Moodle FileManager HTTP operations through the generic BASE3 output. */

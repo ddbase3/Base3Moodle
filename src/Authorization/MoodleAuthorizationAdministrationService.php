@@ -1,14 +1,14 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Authorization;
+namespace Base3\Base3Moodle\Authorization;
 
-use Base3\Authorization\Api\IAuthorizationAdministrationService;
-use Base3\Authorization\Dto\AuthorizationCapabilities;
-use Base3\Authorization\Dto\AuthorizationGrant;
-use Base3\Authorization\Dto\AuthorizationSubject;
-use Base3\Authorization\Dto\ResourceReference;
-use Base3\Authorization\Dto\SubjectReference;
-use Base3\Usermanager\Permission;
+use Base3\CoreFoundation\Authorization\Api\IAuthorizationAdministrationService;
+use Base3\CoreFoundation\Authorization\Dto\AuthorizationCapabilities;
+use Base3\CoreFoundation\Authorization\Dto\AuthorizationGrant;
+use Base3\CoreFoundation\Authorization\Dto\AuthorizationSubject;
+use Base3\CoreFoundation\Authorization\Dto\ResourceReference;
+use Base3\CoreFoundation\Authorization\Dto\SubjectReference;
+use Base3\CoreFoundation\Usermanager\Permission;
 use InvalidArgumentException;
 use RuntimeException;
 

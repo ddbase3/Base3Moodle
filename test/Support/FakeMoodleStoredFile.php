@@ -1,6 +1,6 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Test\Support;
+namespace Base3\Base3Moodle\Test\Support;
 
 final class FakeMoodleStoredFile {
 

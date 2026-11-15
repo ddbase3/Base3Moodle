@@ -1,11 +1,11 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Service;
+namespace Base3\Base3Moodle\Service;
 
-use Base3\Api\IClassMap;
-use Base3\Authorization\Api\IFeature;
-use Base3\Settings\Api\ISettingsStore;
-use Base3\Usermanager\UserCriterionEvaluator;
+use Base3\CoreFoundation\Api\IClassMap;
+use Base3\CoreFoundation\Authorization\Api\IFeature;
+use Base3\CoreFoundation\Settings\Api\ISettingsStore;
+use Base3\Core\Usermanager\UserCriterionEvaluator;
 use InvalidArgumentException;
 
 /** Host-owned feature audience overrides in the existing BASE3 settings backend. */

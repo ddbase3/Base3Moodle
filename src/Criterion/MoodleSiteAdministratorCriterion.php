@@ -1,9 +1,9 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Criterion;
+namespace Base3\Base3Moodle\Criterion;
 
-use Base3\Usermanager\Api\IUserCriterion;
-use Base3\Usermanager\User;
+use Base3\CoreFoundation\Usermanager\Api\IUserCriterion;
+use Base3\CoreFoundation\Usermanager\User;
 use InvalidArgumentException;
 
 /** Delegates the native site-administrator identity check to Moodle. */

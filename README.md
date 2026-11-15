@@ -3,7 +3,7 @@
 ## Generic settings and Moodle File API (6 November 2026)
 
 The native Moodle administration entry renders the common
-`ClientStack\Display\SettingsDisplay`, discovering `UiFoundation\Api\ISettingsTab`
+`Base3\ClientStack\Display\SettingsDisplay`, discovering `Base3\UiFoundation\Api\ISettingsTab`
 contributions through `IClassMap`. It does not own a second tab catalog.
 `Runtime::assertDisplayAccess()` checks native `moodle/site:config` for the
 settings entry and protected administration displays, plus tab visibility for
@@ -68,7 +68,7 @@ immutable. Additional criteria configured by administrators are OR-combined
 with the fixed expression; they cannot revoke code-owned members.
 
 The built-in `anonymous` and `authenticated` groups belong exclusively to
-`Base3Framework` through `Base3AnonymousGroup` and `Base3AuthenticatedGroup`.
+`Core` through `Base3AnonymousGroup` and `Base3AuthenticatedGroup`.
 The previous Moodle-specific declarations of these same logical groups are
 obsolete and must be removed during deployment. `Base3Moodle` only contributes
 the native site-administrator `administration` group; `Base3MoodleLab` owns the
@@ -108,7 +108,7 @@ feature's code-defined default.
 
 The Groups and Features tabs use the **unchanged ClientStack** displays
 `authorizationgroupsdisplay` and `authorizationfeaturesdisplay` and the
-`UiFoundation\Api\IAuthorizationAudienceAdministrationService` contract.
+`Base3\UiFoundation\Api\IAuthorizationAudienceAdministrationService` contract.
 `MoodleAudienceAdministrationService` adapts these to the existing Moodle
 settings services; it does not render a separate UI, duplicate permissions or
 create a new storage backend. The Moodle expression translator converts the

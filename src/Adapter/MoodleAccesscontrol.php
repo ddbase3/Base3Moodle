@@ -1,8 +1,8 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Adapter;
+namespace Base3\Base3Moodle\Adapter;
 
-use Base3\Accesscontrol\Api\IAccesscontrol;
+use Base3\CoreFoundation\Accesscontrol\Api\IAccesscontrol;
 
 final class MoodleAccesscontrol implements IAccesscontrol {
 	public function getUserId() { global $USER; return isloggedin() && !isguestuser() ? (int) $USER->id : 0; }

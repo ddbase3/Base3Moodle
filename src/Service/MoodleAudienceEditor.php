@@ -1,10 +1,10 @@
 <?php declare(strict_types=1);
 
-namespace Base3Moodle\Service;
+namespace Base3\Base3Moodle\Service;
 
-use Base3\Api\IClassMap;
-use Base3\Usermanager\Api\IUserCriterion;
-use Base3\Usermanager\UserCriterionEvaluator;
+use Base3\CoreFoundation\Api\IClassMap;
+use Base3\CoreFoundation\Usermanager\Api\IUserCriterion;
+use Base3\Core\Usermanager\UserCriterionEvaluator;
 use InvalidArgumentException;
 
 /** Moodle criterion and row codec for the unmodified shared ClientStack administration forms. */
