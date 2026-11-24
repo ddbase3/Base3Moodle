@@ -1,13 +1,22 @@
 {
-  "manifestVersion": 1,
-  "name": "Base3Moodle",
-  "namespace": "Base3\\Base3Moodle",
-  "version": "0.3.0",
-  "description": "Moodle host adapters for the BASE3 runtime.",
-  "dependencies": {
-    "Core": ">=4.10.0",
-    "CoreFoundation": ">=4.10.0",
-    "ResourceFoundation": ">=4.5.0",
-    "UiFoundation": ">=4.3.0"
-  }
+	"manifestVersion": 1,
+	"name": "Base3Moodle",
+	"namespace": "Base3\\Base3Moodle",
+	"version": "5.0.0",
+	"description": "Moodle host adapters for the BASE3 runtime.",
+	"license": "GPL-3.0-or-later",
+	"maintainers": [
+		{
+			"name": "Daniel Dahme",
+			"url": "https://www.base3.de",
+			"email": "info@base3.de"
+		}
+	],
+	"repository": "https://github.com/ddbase3/Base3Moodle",
+	"dependencies": {
+		"Core": ">=5.0.0",
+		"CoreFoundation": ">=5.0.0",
+		"ResourceFoundation": ">=5.0.0",
+		"UiFoundation": ">=5.0.0"
+	}
 }
